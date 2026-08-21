@@ -1,0 +1,77 @@
+name: Deploy Coding Agent Stack [FINAL]
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'lambda_function.py'
+      - 'repo_tools.py'
+      - 'template.yaml'
+      - 'requirements.txt'
+      - '.github/workflows/deploy.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  STACK_NAME: coding-agent-stack
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install -r requirements.txt
+          pip install pytest flake8
+      - name: Lint
+        run: flake8 lambda_function.py cli_agent.py cli_auth.py repo_tools.py --max-line-length=120 --extend-ignore=E203
+      - name: Run unit tests
+        run: |
+          if [ -d tests ]; then pytest tests/ -v; else echo "No tests directory found, skipping"; fi
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install aws-sam-cli
+      - run: sam build --use-container
+      - name: SAM deploy
+        run: |
+          sam deploy \
+            --stack-name ${{ env.STACK_NAME }} \
+            --capabilities CAPABILITY_IAM \
+            --region ${{ env.AWS_REGION }} \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --resolve-s3 \
+            --parameter-overrides \
+              VllmEndpoint=${{ secrets.VLLM_ENDPOINT }} \
+              UserPoolId=${{ secrets.COGNITO_USER_POOL_ID }} \
+              TavilyApiKey=${{ secrets.TAVILY_API_KEY }} \
+              SubnetId=${{ secrets.VPC_SUBNET_ID }} \
+              SecurityGroupId=${{ secrets.VPC_SECURITY_GROUP_ID }} \
+              Ec2InstanceId=${{ secrets.EC2_INSTANCE_ID }} \
+              GitHubToken=${{ secrets.GITHUB_TOKEN }} \
+              GitLabToken=${{ secrets.GITLAB_TOKEN }}
+      - name: Get Function URL
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" \
+            --output text

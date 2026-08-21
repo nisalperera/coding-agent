@@ -1,0 +1,9 @@
+openai
+requests
+keyring
+PyJWT
+boto3
+urllib3
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http

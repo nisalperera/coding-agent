@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>My Perplexity Clone [FINAL]</title>
+  <meta charset="utf-8">
+  <style>
+    .progress-container { width: 100%; background: #eee; border-radius: 8px; overflow: hidden; margin: 10px 0; display: none; }
+    .progress-bar { height: 22px; background: linear-gradient(90deg, #4a90e2, #6fb1fc); width: 0%; transition: width 0.3s ease; text-align: center; color: white; font-size: 12px; line-height: 22px; white-space: nowrap; }
+    .progress-label { font-size: 13px; color: #555; margin-bottom: 4px; }
+    .retry-box { border: 1px solid #e74c3c; background: #fdecea; color: #a92417; padding: 10px; border-radius: 6px; margin: 10px 0; }
+  </style>
+</head>
+<body style="font-family: sans-serif; max-width: 700px; margin: 40px auto;">
+
+  <div id="auth-bar" style="text-align:right; margin-bottom: 10px;">
+    <button onclick="loginWithProvider('Google')">Sign in with Google</button>
+    <button onclick="loginWithProvider('GitHub')">Sign in with GitHub</button>
+    <button onclick="logout()">Log out</button>
+  </div>
+
+  <div id="chat" style="min-height: 400px; border: 1px solid #ddd; padding: 16px; border-radius: 8px;"></div>
+
+  <div id="progress-label" class="progress-label" style="display:none;"></div>
+  <div id="progress-container" class="progress-container">
+    <div id="progress-bar" class="progress-bar">0%</div>
+  </div>
+
+  <input id="input" style="width: 85%; padding: 10px;" placeholder="Ask anything...">
+  <button id="send-btn" onclick="send()" style="padding: 10px;">Send</button>
+
+  <script>
+    const LAMBDA_URL = "https://<url-id>.lambda-url.us-east-1.on.aws/";
+    const COGNITO_DOMAIN = "https://coding-agent-pool.auth.us-east-1.amazoncognito.com";
+    const CLIENT_ID = "YOUR_APP_CLIENT_ID";
+    const REDIRECT_URI = window.location.origin + "/callback";
+
+    let history = [];
+
+    function generateCodeVerifier() {
+      const array = new Uint8Array(32);
+      crypto.getRandomValues(array);
+      return btoa(String.fromCharCode(...array)).replace(/[+/=]/g, '');
+    }
+
+    async function generateCodeChallenge(verifier) {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+      return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/[+/=]/g, '');
+    }
+
+    async function loginWithProvider(provider) {
+      const verifier = generateCodeVerifier();
+      sessionStorage.setItem('pkce_verifier', verifier);
+      const challenge = await generateCodeChallenge(verifier);
+      const params = new URLSearchParams({
+        client_id: CLIENT_ID, response_type: 'code', scope: 'openid email profile',
+        redirect_uri: REDIRECT_URI, identity_provider: provider,
+        code_challenge: challenge, code_challenge_method: 'S256',
+      });
+      window.location.href = `${COGNITO_DOMAIN}/oauth2/authorize?${params}`;
+    }
+
+    async function handleCallback() {
+      const code = new URLSearchParams(window.location.search).get('code');
+      if (!code) return;
+      const verifier = sessionStorage.getItem('pkce_verifier');
+      const resp = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({
+          grant_type: 'authorization_code', client_id: CLIENT_ID, code,
+          redirect_uri: REDIRECT_URI, code_verifier: verifier,
+        }),
+      });
+      const tokens = await resp.json();
+      localStorage.setItem('id_token', tokens.id_token);
+      localStorage.setItem('access_token', tokens.access_token);
+      localStorage.setItem('refresh_token', tokens.refresh_token);
+      window.location.href = '/';
+    }
+
+    function logout() {
+      localStorage.clear();
+      window.location.href = `${COGNITO_DOMAIN}/logout?client_id=${CLIENT_ID}&logout_uri=${window.location.origin}/logout`;
+    }
+
+    if (window.location.pathname === '/callback') { handleCallback(); }
+
+    function showProgress() {
+      document.getElementById('progress-container').style.display = 'block';
+      document.getElementById('progress-label').style.display = 'block';
+    }
+    function hideProgress() {
+      document.getElementById('progress-container').style.display = 'none';
+      document.getElementById('progress-label').style.display = 'none';
+      updateProgressBar(0, '');
+    }
+    function updateProgressBar(percent, message) {
+      const bar = document.getElementById('progress-bar');
+      const label = document.getElementById('progress-label');
+      bar.style.width = percent + '%';
+      bar.textContent = percent + '%';
+      label.textContent = message || '';
+    }
+    function showRetryMessage(message, retryAfterSeconds) {
+      const chat = document.getElementById('chat');
+      const div = document.createElement('div');
+      div.className = 'retry-box';
+      const mins = Math.ceil((retryAfterSeconds || 120) / 60);
+      div.innerHTML = `<b>Backend is still starting up.</b><br>${message || ''}<br>Please try again in about ${mins} minute(s).`;
+      chat.appendChild(div);
+    }
+
+    async function send() {
+      const input = document.getElementById('input');
+      const chat = document.getElementById('chat');
+      const sendBtn = document.getElementById('send-btn');
+      const message = input.value;
+      if (!message) return;
+      input.value = '';
+      sendBtn.disabled = true;
+      chat.innerHTML += `<p><b>You:</b> ${message}</p>`;
+      history.push({role: 'user', content: message});
+      showProgress();
+      updateProgressBar(0, 'Sending request...');
+
+      let resp;
+      try {
+        resp = await fetch(LAMBDA_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+          body: JSON.stringify({message, history: history.slice(0, -1)})
+        });
+      } catch (err) {
+        hideProgress();
+        showRetryMessage('Network error contacting server.', 120);
+        sendBtn.disabled = false;
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let answerStarted = false;
+      let answer = '';
+      let answerSpan = null;
+
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          if (line.startsWith('data: ')) {
+            const payload = line.slice(6);
+            if (payload === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(payload);
+              if (parsed.token !== undefined) {
+                if (!answerStarted) {
+                  hideProgress();
+                  const p = document.createElement('p');
+                  p.innerHTML = '<b>AI:</b> <span></span>';
+                  chat.appendChild(p);
+                  answerSpan = p.querySelector('span');
+                  answerStarted = true;
+                }
+                answer += parsed.token;
+                answerSpan.textContent = answer;
+              }
+            } catch (e) {}
+            continue;
+          }
+          try {
+            const data = JSON.parse(line);
+            handleControlMessage(data);
+          } catch (e) {}
+        }
+      }
+
+      if (answerStarted) { history.push({role: 'assistant', content: answer}); }
+      hideProgress();
+      sendBtn.disabled = false;
+    }
+
+    function handleControlMessage(data) {
+      if (data.type === 'progress') {
+        showProgress();
+        updateProgressBar(data.percent, data.message);
+      } else if (data.type === 'error') {
+        hideProgress();
+        showRetryMessage(data.message, data.retry_after_seconds);
+      } else if (data.type === 'confirmation_required') {
+        hideProgress();
+        renderConfirmation(data);
+      } else if (data.type === 'answer_start') {
+        updateProgressBar(100, 'Generating answer...');
+      }
+    }
+
+    function renderConfirmation(data) {
+      const chat = document.getElementById('chat');
+      const div = document.createElement('div');
+      div.style = "border:1px solid orange; padding:10px; margin:8px 0; border-radius:6px;";
+      div.innerHTML = `
+        <p>\u26a0\ufe0f Agent wants to run <b>${data.tool_name}</b>:</p>
+        <pre>${JSON.stringify(data.args, null, 2)}</pre>
+        <button id="approve-${data.action_id}">Approve</button>
+        <button id="deny-${data.action_id}">Deny</button>
+      `;
+      chat.appendChild(div);
+      document.getElementById(`approve-${data.action_id}`).onclick = () => resolveAction(data.action_id, 'approve');
+      document.getElementById(`deny-${data.action_id}`).onclick = () => resolveAction(data.action_id, 'deny');
+    }
+
+    async function resolveAction(actionId, decision) {
+      const resp = await fetch(LAMBDA_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({action: 'approve_pending', action_id: actionId, decision}),
+      });
+      const result = await resp.json();
+      document.getElementById('chat').innerHTML += `<p><i>${result.result}</i></p>`;
+    }
+  </script>
+</body>
+</html>

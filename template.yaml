@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "[FINAL] Perplexity-style web app backend (Lambda + response streaming + EC2 auto-start + repo tools)"
+
+Parameters:
+  VllmEndpoint:
+    Type: String
+    Description: Private HTTP endpoint of the vLLM server on the T4 EC2 instance
+  UserPoolId:
+    Type: String
+  TavilyApiKey:
+    Type: String
+    NoEcho: true
+  SubnetId:
+    Type: String
+  SecurityGroupId:
+    Type: String
+  Ec2InstanceId:
+    Type: String
+    Description: Instance ID of the T4 EC2 host running vLLM
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Description: GitHub personal access token (repo scope) for branch/PR/issue tools
+  GitLabToken:
+    Type: String
+    NoEcho: true
+    Description: GitLab personal/project access token (api scope) for branch/MR/issue tools
+
+Resources:
+  PendingActionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: pending-actions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: action_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: action_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  ChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: perplexity-clone-chat
+      Runtime: python3.12
+      Handler: lambda_function.handler
+      Timeout: 180
+      MemorySize: 512
+      Environment:
+        Variables:
+          VLLM_ENDPOINT: !Ref VllmEndpoint
+          MODEL_NAME: Qwen/Qwen3-Coder-14B-Instruct-AWQ
+          USER_POOL_ID: !Ref UserPoolId
+          TAVILY_API_KEY: !Ref TavilyApiKey
+          EC2_INSTANCE_ID: !Ref Ec2InstanceId
+          STARTUP_BUDGET_S: "120"
+          GITHUB_TOKEN: !Ref GitHubToken
+          GITLAB_TOKEN: !Ref GitLabToken
+      VpcConfig:
+        SubnetIds:
+          - !Ref SubnetId
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PendingActionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:DescribeInstances
+                - ec2:StartInstances
+              Resource: !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Ec2InstanceId}"
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+        Cors:
+          AllowOrigins: ["*"]
+          AllowMethods: ["POST"]
+
+Outputs:
+  FunctionUrl:
+    Value: !GetAtt ChatFunctionUrl.FunctionUrl

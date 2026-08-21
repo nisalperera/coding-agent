@@ -1,0 +1,75 @@
+# [FINAL]
+stages:
+  - test
+  - deploy
+
+variables:
+  AWS_REGION: "us-east-1"
+  STACK_NAME: "coding-agent-stack"
+
+test:
+  stage: test
+  image: python:3.12-slim
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - pip install -r requirements.txt
+    - pip install pytest flake8
+    - flake8 lambda_function.py cli_agent.py cli_auth.py repo_tools.py --max-line-length=120 --extend-ignore=E203
+    - if [ -d tests ]; then pytest tests/ -v; else echo "No tests directory found, skipping"; fi
+
+deploy:
+  stage: deploy
+  image: python:3.12-slim
+  needs:
+    - test
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  id_tokens:
+    AWS_ID_TOKEN:
+      aud: https://gitlab.com
+  before_script:
+    - pip install aws-sam-cli
+    - apt-get update && apt-get install -y curl unzip jq
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip -q awscliv2.zip
+    - ./aws/install
+    - >
+      export $(aws sts assume-role-with-web-identity
+      --role-arn $AWS_DEPLOY_ROLE_ARN
+      --role-session-name gitlab-ci-deploy
+      --web-identity-token $AWS_ID_TOKEN
+      --duration-seconds 3600
+      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
+      --output text | awk '{print "AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')
+  script:
+    - export AWS_DEFAULT_REGION=$AWS_REGION
+    - sam build --use-container
+    - >
+      sam deploy
+      --stack-name $STACK_NAME
+      --capabilities CAPABILITY_IAM
+      --region $AWS_REGION
+      --no-confirm-changeset
+      --no-fail-on-empty-changeset
+      --resolve-s3
+      --parameter-overrides
+      VllmEndpoint=$VLLM_ENDPOINT
+      UserPoolId=$COGNITO_USER_POOL_ID
+      TavilyApiKey=$TAVILY_API_KEY
+      SubnetId=$VPC_SUBNET_ID
+      SecurityGroupId=$VPC_SECURITY_GROUP_ID
+      Ec2InstanceId=$EC2_INSTANCE_ID
+      GitHubToken=$GITHUB_TOKEN
+      GitLabToken=$GITLAB_TOKEN
+    - >
+      aws cloudformation describe-stacks
+      --stack-name $STACK_NAME
+      --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue"
+      --output text
+  environment:
+    name: production
+  artifacts:
+    paths:
+      - .aws-sam/build/
+    expire_in: 1 week
