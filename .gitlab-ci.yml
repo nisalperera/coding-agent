@@ -62,6 +62,8 @@ deploy:
       Ec2InstanceId=$EC2_INSTANCE_ID
       GitHubToken=$GITHUB_TOKEN
       GitLabToken=$GITLAB_TOKEN
+      GitHubOAuthClientId=$GITHUB_OAUTH_CLIENT_ID
+      GitHubOAuthClientSecret=$GITHUB_OAUTH_CLIENT_SECRET
     - >
       aws cloudformation describe-stacks
       --stack-name $STACK_NAME
@@ -98,8 +100,10 @@ deploy-frontend:
       --stack-name $STACK_NAME
       --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue"
       --output text)
-    - sed -i "s|__LAMBDA_FUNCTION_URL__|$FUNCTION_URL|g" front-end/index.html
-    - sed -i "s|__COGNITO_DOMAIN__|$COGNITO_DOMAIN|g" front-end/index.html
-    - sed -i "s|__COGNITO_CLIENT_ID__|$COGNITO_CLIENT_ID|g" front-end/index.html
+    - sed -i "s|__LAMBDA_FUNCTION_URL__|$FUNCTION_URL|g" front-end/config.js
+    - sed -i "s|__COGNITO_DOMAIN__|$COGNITO_DOMAIN|g" front-end/config.js
+    - sed -i "s|__COGNITO_CLIENT_ID__|$COGNITO_CLIENT_ID|g" front-end/config.js
+    - sed -i "s|__GITHUB_OAUTH_CLIENT_ID__|$GITHUB_OAUTH_CLIENT_ID|g" front-end/config.js
+    - sed -i "s|__GITLAB_OAUTH_CLIENT_ID__|$GITLAB_OAUTH_CLIENT_ID|g" front-end/config.js
     - aws s3 sync front-end/ s3://$FRONTEND_BUCKET/ --delete
     - if [ -n "$CLOUDFRONT_DISTRIBUTION_ID" ]; then aws cloudfront create-invalidation --distribution-id $CLOUDFRONT_DISTRIBUTION_ID --paths "/*"; fi
