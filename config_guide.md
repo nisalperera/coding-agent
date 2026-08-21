@@ -130,9 +130,13 @@ Create a fine-grained PAT scoped to the specific repositories the agent should t
 - Pull requests: Read and write
 - Issues: Read and write
 
+Generate it at **github.com → Settings → Developer settings → Personal access tokens →
+Fine-grained tokens → Generate new token**.
+
 ### 4.2 GitLab personal/project access token
 
-Create a project access token with the `api` scope, scoped to specific projects.
+Create a project access token with the `api` scope, scoped to specific projects, at
+**gitlab.com → your project → Settings → Access Tokens**.
 
 ### 4.3 Store both as secrets
 
@@ -163,8 +167,11 @@ sam deploy --guided
 
 Prompted for: `VllmEndpoint`, `UserPoolId`, `TavilyApiKey`, `SubnetId`, `SecurityGroupId`,
 `Ec2InstanceId`, `GitHubToken`, `GitLabToken`, `GitHubOAuthClientId`, `GitHubOAuthClientSecret`
-(see Section 16), and optionally `DomainName`/`HostedZoneId` (see Section 19). This same
-`sam deploy` now also provisions the front-end's S3 bucket and CloudFront distribution
+(see Section 16), and optionally `DomainName`/`HostedZoneId` (see Section 19). Note: these
+are CloudFormation/SAM **parameter** names, unrelated to the GitHub Actions **secret**
+names in Section 18 — a SAM parameter called `GitHubToken` can be fed by a GitHub Actions
+secret named `GH_TOKEN` (or anything else); the two naming systems are independent. This
+same `sam deploy` now also provisions the front-end's S3 bucket and CloudFront distribution
 (Section 15) — there is nothing left to create manually for hosting. The Lambda Function
 URL is never hand-edited into `index.html`; it is injected automatically into
 `front-end/config.js` by the CI/CD front-end deploy job.
@@ -205,7 +212,9 @@ python cli_agent.py "Open a PR on my-org/my-repo adding a fix for the divide-by-
 python cli_agent.py logout
 ```
 
-Tokens are stored via the OS keyring, never written to plaintext files.
+Tokens are stored via the OS keyring, never written to plaintext files. These are plain
+shell environment variables on your own machine, so the GitHub Actions `GITHUB_` naming
+restriction (Section 18) does not apply here.
 
 ---
 
@@ -327,8 +336,17 @@ aws iam get-role --role-name github-actions-deploy-role --query 'Role.Arn' --out
 
 Add as `AWS_DEPLOY_ROLE_ARN`, plus: `VLLM_ENDPOINT`, `COGNITO_USER_POOL_ID`,
 `TAVILY_API_KEY`, `VPC_SUBNET_ID`, `VPC_SECURITY_GROUP_ID`, `EC2_INSTANCE_ID`,
-`GITHUB_TOKEN`, `GITLAB_TOKEN`, and the additional front-end/OAuth secrets listed in
+`GH_TOKEN`, `GITLAB_TOKEN`, and the additional front-end/OAuth secrets listed in
 Section 18.
+
+> **Important:** GitHub Actions rejects any repository secret whose name starts with
+> `GITHUB_` (case-insensitive) — that prefix is reserved for the platform's own
+> auto-generated `secrets.GITHUB_TOKEN`. This is why the shared GitHub PAT and the
+> GitHub OAuth App credentials are named `GH_TOKEN`, `GH_OAUTH_CLIENT_ID`, and
+> `GH_OAUTH_CLIENT_SECRET` in this repo's GitHub Secrets (Section 18), even though the
+> corresponding SAM/CloudFormation parameters in `template.yaml` are still called
+> `GitHubToken`, `GitHubOAuthClientId`, and `GitHubOAuthClientSecret` — GitHub secret
+> names and CloudFormation parameter names are two independent naming systems.
 
 ---
 
@@ -390,8 +408,9 @@ job (Section 15) with its own `role-session-name` for auditability.
 
 `AWS_DEPLOY_ROLE_ARN`, `VLLM_ENDPOINT`, `COGNITO_USER_POOL_ID`, `TAVILY_API_KEY`,
 `VPC_SUBNET_ID`, `VPC_SECURITY_GROUP_ID`, `EC2_INSTANCE_ID`, `GITHUB_TOKEN`,
-`GITLAB_TOKEN` — mark as masked/protected. See Section 18 for the additional
-front-end/OAuth/domain variables.
+`GITLAB_TOKEN` — mark as masked/protected. GitLab does **not** reserve a `GITLAB_`-style
+prefix the way GitHub does, so these variables keep their natural names (no `GH_`
+renaming needed here). See Section 18 for the additional front-end/OAuth/domain variables.
 
 ---
 
@@ -402,8 +421,8 @@ front-end/OAuth/domain variables.
 - [ ] No static AWS access keys stored in either GitHub Secrets or GitLab CI/CD Variables
 - [ ] Deploy role permissions narrowed to least-privilege before production
 - [ ] Test stage (lint + pytest) must pass before deploy stage runs
-- [ ] Sensitive parameters (including GITHUB_TOKEN/GITLAB_TOKEN and the new
-      GITHUB_OAUTH_CLIENT_SECRET) marked as masked/protected
+- [ ] Sensitive parameters (including GH_TOKEN/GITLAB_TOKEN and the new
+      GH_OAUTH_CLIENT_SECRET) marked as masked/protected
 - [ ] `deploy-frontend` runs only after `deploy` succeeds (`needs: deploy`), since it reads
       the S3 bucket name and CloudFront distribution ID from that stack's outputs
 
@@ -468,7 +487,9 @@ repositories, independent of the shared `GitHubToken` PAT in Section 4.
    domain).
 3. Request scopes `repo` and `read:user` (set at authorize-time by the front-end, not
    here).
-4. Copy the generated **Client ID** and **Client Secret**.
+4. Copy the generated **Client ID** and **Client Secret** — store them as GitHub Secrets
+   `GH_OAUTH_CLIENT_ID` and `GH_OAUTH_CLIENT_SECRET` (see Section 18 for why not
+   `GITHUB_OAUTH_CLIENT_ID`).
 5. The `UserIntegrationsTable` DynamoDB table that stores per-user tokens is already
    declared in `template.yaml` and created automatically by `sam deploy` — no manual
    `aws dynamodb create-table` step is needed.
@@ -504,19 +525,29 @@ browser.
 
 ## 18. Consolidated secrets / variables reference
 
-| Name | Used by | Notes |
-|---|---|---|
-| `AWS_DEPLOY_ROLE_ARN` | GitHub Actions + GitLab CI | OIDC deploy role, no static keys |
-| `VLLM_ENDPOINT` | `deploy` job (SAM param) | |
-| `COGNITO_USER_POOL_ID` | `deploy` job (SAM param `UserPoolId`) | |
-| `TAVILY_API_KEY` | `deploy` job (SAM param) | |
-| `VPC_SUBNET_ID` / `VPC_SECURITY_GROUP_ID` | `deploy` job (SAM params) | |
-| `EC2_INSTANCE_ID` | `deploy` job (SAM param) | |
-| `GITHUB_TOKEN` / `GITLAB_TOKEN` | `deploy` job (SAM params) | Shared service-level PATs, Section 4 |
-| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | `deploy` job (SAM params) + `deploy-frontend` job | Per-user "Connect GitHub", Section 16 |
-| `GITLAB_OAUTH_CLIENT_ID` | `deploy-frontend` job only | Per-user "Connect GitLab", Section 17 (no secret needed) |
-| `COGNITO_DOMAIN` / `COGNITO_CLIENT_ID` | `deploy-frontend` job | Cognito Hosted UI, Section 2 |
-| `FRONTEND_DOMAIN_NAME` / `FRONTEND_HOSTED_ZONE_ID` | `deploy` job (SAM params `DomainName`/`HostedZoneId`) | Optional; leave both unset to use the default `*.cloudfront.net` domain. Section 19 |
+GitHub Actions rejects any repository secret whose name starts with `GITHUB_`
+(case-insensitive) — that prefix is reserved for the platform's own auto-generated
+`secrets.GITHUB_TOKEN`. The table below uses the renamed, actually-creatable names for
+GitHub; GitLab has no equivalent restriction, so its variable names are unchanged.
+
+| GitHub secret name | GitLab CI variable name | Used by | Where to get it |
+|---|---|---|---|
+| `AWS_DEPLOY_ROLE_ARN` | `AWS_DEPLOY_ROLE_ARN` | OIDC deploy role | `aws iam get-role --role-name github-actions-deploy-role --query 'Role.Arn' --output text` (Section 12.4) — use `gitlab-ci-deploy-role` for the GitLab value (Section 13.3) |
+| `VLLM_ENDPOINT` | `VLLM_ENDPOINT` | `deploy` job (SAM param) | The private HTTP endpoint you configured when starting vLLM on the T4 instance (Section 1), e.g. `http://<ec2-private-ip>:8000/v1` |
+| `COGNITO_USER_POOL_ID` | `COGNITO_USER_POOL_ID` | `deploy` job (SAM param `UserPoolId`) | AWS Console → Cognito → User pools → your pool → "User pool ID", or `aws cognito-idp list-user-pools --max-results 20` |
+| `TAVILY_API_KEY` | `TAVILY_API_KEY` | `deploy` job (SAM param) | [app.tavily.com](https://app.tavily.com) → Overview/API Keys |
+| `VPC_SUBNET_ID` | `VPC_SUBNET_ID` | `deploy` job (SAM param) | AWS Console → VPC → Subnets, or `aws ec2 describe-subnets --query "Subnets[].SubnetId"` |
+| `VPC_SECURITY_GROUP_ID` | `VPC_SECURITY_GROUP_ID` | `deploy` job (SAM param) | AWS Console → VPC → Security Groups, or `aws ec2 describe-security-groups --query "SecurityGroups[].GroupId"` |
+| `EC2_INSTANCE_ID` | `EC2_INSTANCE_ID` | `deploy` job (SAM param) | AWS Console → EC2 → Instances, or `aws ec2 describe-instances --query "Reservations[].Instances[].InstanceId"` |
+| `GH_TOKEN` | `GITHUB_TOKEN` | `deploy` job (SAM param `GitHubToken`) | github.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens (Section 4.1) |
+| `GITLAB_TOKEN` | `GITLAB_TOKEN` | `deploy` job (SAM param `GitLabToken`) | gitlab.com → project → Settings → Access Tokens, `api` scope (Section 4.2) |
+| `GH_OAUTH_CLIENT_ID` | `GITHUB_OAUTH_CLIENT_ID` | `deploy` job (SAM param) + `deploy-frontend` job | github.com → Settings → Developer settings → OAuth Apps → New OAuth App (Section 16) |
+| `GH_OAUTH_CLIENT_SECRET` | `GITHUB_OAUTH_CLIENT_SECRET` | `deploy` job (SAM param) | Same OAuth App page as above, generated alongside the Client ID (Section 16) |
+| `GITLAB_OAUTH_CLIENT_ID` | `GITLAB_OAUTH_CLIENT_ID` | `deploy-frontend` job only | gitlab.com → User Settings → Applications, public/native (Section 17, no secret needed) |
+| `COGNITO_DOMAIN` | `COGNITO_DOMAIN` | `deploy-frontend` job | AWS Console → Cognito → your pool → App integration → Domain, or `aws cognito-idp describe-user-pool-domain --domain <your-domain-prefix>` |
+| `COGNITO_CLIENT_ID` | `COGNITO_CLIENT_ID` | `deploy-frontend` job | AWS Console → Cognito → your pool → App integration → App clients, or `aws cognito-idp list-user-pool-clients --user-pool-id <pool-id>` |
+| `FRONTEND_DOMAIN_NAME` (optional) | `FRONTEND_DOMAIN_NAME` (optional) | `deploy` job (SAM param `DomainName`) | The domain you already own in Route 53, e.g. `agent.yourdomain.com` |
+| `FRONTEND_HOSTED_ZONE_ID` (optional) | `FRONTEND_HOSTED_ZONE_ID` (optional) | `deploy` job (SAM param `HostedZoneId`) | `aws route53 list-hosted-zones-by-name --dns-name yourdomain.com --query "HostedZones[0].Id" --output text` (Section 19.1) |
 
 `FRONTEND_BUCKET` and `CLOUDFRONT_DISTRIBUTION_ID` are **no longer secrets** — both are
 now CloudFormation-managed (`FrontendBucket`, `FrontendDistribution` in `template.yaml`,
