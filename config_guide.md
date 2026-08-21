@@ -510,6 +510,3 @@ Section 15) and resolved dynamically by CI from the stack outputs.
 Mark every secret above as masked/protected in both GitHub and GitLab.
 
 ---
-
-*This document, and the accompanying code package, are marked FINAL as of the version
-delivered in this session.*
