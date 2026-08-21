@@ -271,6 +271,8 @@ implemented by design.
 - Add OpenTelemetry exporter configuration for full distributed tracing.
 - Per-user GitHub OAuth tokens (Section 16) currently have no refresh/expiry handling and
   no scoped revocation endpoint exposed to the user beyond clearing local browser storage.
+- ~~Deploy role IAM permissions are overly broad (`IAMFullAccess` etc.)~~ — resolved by the
+  least-privilege policy in Section 20.
 
 ---
 
@@ -325,8 +327,9 @@ aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn a
 `cloudfront create-invalidation` (Section 15). If you use the optional custom domain
 (Section 19), also attach `arn:aws:iam::aws:policy/AWSCertificateManagerFullAccess` and
 `arn:aws:iam::aws:policy/AmazonRoute53FullAccess` so the deploy role can create the ACM
-certificate and Route 53 alias record. Replace these broad policies with a
-least-privilege custom policy before production.
+certificate and Route 53 alias record. **These are quick-start policies only** — replace
+them with the least-privilege inline policy in Section 20 before production, which scopes
+every action down to this stack's specific resources and removes `IAMFullAccess` entirely.
 
 ### 12.4 Get the role ARN and add it to GitHub Secrets
 
@@ -396,7 +399,8 @@ aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aw
 
 If you use the optional custom domain (Section 19), also attach
 `arn:aws:iam::aws:policy/AWSCertificateManagerFullAccess` and
-`arn:aws:iam::aws:policy/AmazonRoute53FullAccess`.
+`arn:aws:iam::aws:policy/AmazonRoute53FullAccess`. As with the GitHub role, replace these
+with the least-privilege policy in Section 20 before production.
 
 ### 13.4 `.gitlab-ci.yml` OIDC deploy job
 
@@ -419,7 +423,7 @@ renaming needed here). See Section 18 for the additional front-end/OAuth/domain 
 - [ ] GitHub OIDC trust policy scoped to `refs/heads/main` only
 - [ ] GitLab OIDC trust policy scoped to `ref_type:branch:ref:main` only
 - [ ] No static AWS access keys stored in either GitHub Secrets or GitLab CI/CD Variables
-- [ ] Deploy role permissions narrowed to least-privilege before production
+- [ ] Deploy role permissions narrowed to least-privilege before production (Section 20)
 - [ ] Test stage (lint + pytest) must pass before deploy stage runs
 - [ ] Sensitive parameters (including GH_TOKEN/GITLAB_TOKEN and the new
       GH_OAUTH_CLIENT_SECRET) marked as masked/protected
@@ -608,6 +612,249 @@ HTTP request — to either the default `*.cloudfront.net` domain or a configured
 domain — is redirected to HTTPS automatically. There is no HTTP-only mode. Every OAuth
 callback URL you register (Cognito Hosted UI, GitHub OAuth App, GitLab application) should
 therefore always use `https://`, matching the `FrontendUrl` stack output.
+
+---
+
+## 20. Least-privilege IAM policy for the deploy role (production hardening)
+
+The quick-start policies in Sections 12.3/13.3 (`AWSCloudFormationFullAccess`,
+`IAMFullAccess`, `AWSLambda_FullAccess`, `AmazonDynamoDBFullAccess`,
+`AmazonS3FullAccess`, `CloudFrontFullAccess`, and optionally
+`AWSCertificateManagerFullAccess`/`AmazonRoute53FullAccess`) get you deploying quickly,
+but `IAMFullAccess` in particular lets the deploy role create or modify *any* IAM
+identity in the account — far more than it actually needs. The policy below scopes every
+action down to what `template.yaml` actually does, and is the recommended replacement
+before production.
+
+### 20.1 Replace the managed policies with this inline policy
+
+Save as `deploy-role-least-privilege.json`, substituting `<ACCOUNT_ID>` and `<REGION>`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudFormationStackManagement",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateStack",
+        "cloudformation:UpdateStack",
+        "cloudformation:DeleteStack",
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResource",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:GetTemplate",
+        "cloudformation:ListStackResources",
+        "cloudformation:CreateChangeSet",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:DeleteChangeSet",
+        "cloudformation:ValidateTemplate"
+      ],
+      "Resource": "arn:aws:cloudformation:<REGION>:<ACCOUNT_ID>:stack/coding-agent-stack/*"
+    },
+    {
+      "Sid": "SamArtifactsAndFrontendBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:GetBucketLocation",
+        "s3:GetBucketPolicy",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutEncryptionConfiguration",
+        "s3:ListBucket",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::aws-sam-cli-managed-*",
+        "arn:aws:s3:::aws-sam-cli-managed-*/*",
+        "arn:aws:s3:::coding-agent-frontend-*",
+        "arn:aws:s3:::coding-agent-frontend-*/*"
+      ]
+    },
+    {
+      "Sid": "LambdaFunctionAndUrl",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:DeleteFunction",
+        "lambda:TagResource",
+        "lambda:UntagResource",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:UpdateFunctionUrlConfig",
+        "lambda:GetFunctionUrlConfig",
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
+        "lambda:GetPolicy"
+      ],
+      "Resource": "arn:aws:lambda:<REGION>:<ACCOUNT_ID>:function:perplexity-clone-chat"
+    },
+    {
+      "Sid": "DynamoDbTables",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:UpdateTimeToLive",
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/pending-actions",
+        "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/user-integrations"
+      ]
+    },
+    {
+      "Sid": "CloudFrontDistributionAndOac",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateDistribution",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:TagResource",
+        "cloudfront:UntagResource",
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:UpdateOriginAccessControl",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetInvalidation"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AcmCertificateForCustomDomain",
+      "Effect": "Allow",
+      "Action": [
+        "acm:RequestCertificate",
+        "acm:DescribeCertificate",
+        "acm:DeleteCertificate",
+        "acm:AddTagsToCertificate",
+        "acm:ListTagsForCertificate"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Route53AliasRecordForCustomDomain",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ChangeResourceRecordSets",
+        "route53:GetHostedZone",
+        "route53:ListResourceRecordSets",
+        "route53:GetChange"
+      ],
+      "Resource": [
+        "arn:aws:route53:::hostedzone/*",
+        "arn:aws:route53:::change/*"
+      ]
+    },
+    {
+      "Sid": "LambdaExecutionRoleManagement",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/coding-agent-stack-*"
+    },
+    {
+      "Sid": "PassLambdaExecutionRoleToLambdaOnly",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/coding-agent-stack-*",
+      "Condition": {
+        "StringEquals": { "iam:PassedToService": "lambda.amazonaws.com" }
+      }
+    }
+  ]
+}
+```
+
+Attach it in place of the broad managed policies:
+
+```bash
+aws iam put-role-policy \
+  --role-name github-actions-deploy-role \
+  --policy-name coding-agent-deploy-least-privilege \
+  --policy-document file://deploy-role-least-privilege.json
+
+# Detach the quick-start managed policies once the inline policy above works end-to-end
+aws iam detach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/IAMFullAccess
+aws iam detach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
+aws iam detach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/CloudFrontFullAccess
+aws iam detach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+aws iam detach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSLambda_FullAccess
+aws iam detach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+aws iam detach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSCertificateManagerFullAccess
+aws iam detach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonRoute53FullAccess
+```
+
+Repeat both commands for `gitlab-ci-deploy-role` (Section 13.3) using the same JSON file.
+
+### 20.2 Why each statement is scoped the way it is
+
+- **`CloudFormationStackManagement`** — locked to the exact stack ARN
+  (`stack/coding-agent-stack/*`), so this role cannot touch any other CloudFormation
+  stack in the account.
+- **`SamArtifactsAndFrontendBucket`** — two bucket name patterns only:
+  `aws-sam-cli-managed-*` (SAM's own deployment-artifact bucket, auto-created by
+  `--resolve-s3`) and `coding-agent-frontend-*` (`FrontendBucket`). No `s3:*` on `*`.
+- **`LambdaFunctionAndUrl`** — scoped to the single function name
+  `perplexity-clone-chat` (`FunctionName` in `template.yaml`), not all Lambdas in the
+  account.
+- **`DynamoDbTables`** — scoped to exactly the two table ARNs this stack creates.
+- **`CloudFrontDistributionAndOac`** and **`AcmCertificateForCustomDomain`** — CloudFront
+  and ACM resource-level ARNs are not addressable the same way as regional services (both
+  use global, largely resource-agnostic ARN formats), so these two statements use
+  `Resource: "*"` but are still action-scoped to only the operations this stack performs
+  (create/update/delete/tag/invalidate) — no `cloudfront:*` or `acm:*` wildcard actions.
+- **`Route53AliasRecordForCustomDomain`** — if you want to scope this further to only your
+  specific hosted zone, replace `hostedzone/*` with
+  `hostedzone/<YOUR_HOSTED_ZONE_ID>` from Section 19.1.
+- **`LambdaExecutionRoleManagement`** — the actual fix for the `IAMFullAccess` overreach.
+  SAM auto-generates a Lambda execution role named like `coding-agent-stack-ChatFunctionRole-xxxx`;
+  this statement restricts role creation/management to the `coding-agent-stack-*` name
+  prefix only, so the deploy role cannot create or modify IAM roles anywhere else in the
+  account.
+- **`PassLambdaExecutionRoleToLambdaOnly`** — the security-critical piece: even within the
+  `coding-agent-stack-*` role prefix, `iam:PassRole` is only permitted when the role is
+  being passed **to the Lambda service specifically**
+  (`iam:PassedToService: lambda.amazonaws.com`), closing the classic privilege-escalation
+  path where a broad `PassRole` grant lets a CI role hand a highly-privileged role to an
+  unrelated service.
+
+### 20.3 What's intentionally left out
+
+There is no `ec2:*` permission here — the VPC subnet/security group IDs
+(`SubnetId`/`SecurityGroupId` parameters) are only *referenced* by ARN/ID when creating
+the Lambda's `VpcConfig`; the deploy role doesn't need to describe or modify EC2 resources
+itself. The Lambda's own runtime EC2 permissions (`ec2:DescribeInstances`,
+`ec2:StartInstances` on the T4 host) are granted separately to the **Lambda execution
+role** via the `Policies: Statement` block already inside `template.yaml`'s `ChatFunction`
+resource — that's a different role from `AWS_DEPLOY_ROLE_ARN` and doesn't need anything
+added here.
 
 ---
 
