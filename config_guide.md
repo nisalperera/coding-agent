@@ -74,6 +74,11 @@ aws cognito-idp create-identity-provider \
 
 Note: GitHub's OAuth implementation does not fully comply with OIDC discovery. Test early.
 
+> This GitHub identity provider is only used to let a user **sign in to the coding
+> agent itself** via Cognito Hosted UI. It is separate from the per-user "Connect
+> GitHub" repository-authorization feature covered in Section 16 — that flow uses its
+> own, independent GitHub OAuth App and never touches Cognito.
+
 ### 2.3 Create the app client (public client, PKCE-ready)
 
 ```bash
@@ -142,6 +147,11 @@ aws secretsmanager create-secret \
 Reference via `{{resolve:secretsmanager:...}}` in `template.yaml` and pass as
 `GitHubToken` / `GitLabToken` parameters at deploy time.
 
+> These are the **shared, service-level** tokens used by the existing `github_push_file`
+> / `gitlab_push_file` tools. They are independent of the per-user "Connect GitHub" /
+> "Connect GitLab" OAuth flow described in Sections 16–17, which lets individual signed-in
+> users additionally authorize the agent against their own accounts.
+
 ---
 
 ## 5. Deploy the Lambda function (SAM)
@@ -152,8 +162,10 @@ sam deploy --guided
 ```
 
 Prompted for: `VllmEndpoint`, `UserPoolId`, `TavilyApiKey`, `SubnetId`, `SecurityGroupId`,
-`Ec2InstanceId`, `GitHubToken`, `GitLabToken`. Update `LAMBDA_URL` in `index.html` with the
-resulting Function URL.
+`Ec2InstanceId`, `GitHubToken`, `GitLabToken`, `GitHubOAuthClientId`, `GitHubOAuthClientSecret`
+(see Section 16). The Lambda Function URL is no longer hand-edited into `index.html` —
+it is injected automatically into `front-end/config.js` by the CI/CD front-end deploy job
+(see Section 15).
 
 ---
 
@@ -227,6 +239,9 @@ implemented by design.
 - [x] Lambda response streaming for real-time token output
 - [x] EC2 auto-start with bounded 2-minute startup budget and progress/retry UX
 - [x] Repo-management tools use REST API endpoints only, never shell git/gh/glab commands
+- [x] Per-user GitHub/GitLab OAuth tokens stored server-side in DynamoDB, never in the browser
+      for GitHub (client secret never leaves the Lambda); GitLab uses browser-side PKCE with
+      no client secret, appropriate for a public client
 
 ---
 
@@ -237,6 +252,8 @@ implemented by design.
 - GitHub/GitLab tokens currently use broad PAT scopes; narrow to fine-grained,
   repo-specific tokens before production use.
 - Add OpenTelemetry exporter configuration for full distributed tracing.
+- Per-user GitHub OAuth tokens (Section 16) currently have no refresh/expiry handling and
+  no scoped revocation endpoint exposed to the user beyond clearing local browser storage.
 
 ---
 
@@ -295,7 +312,8 @@ aws iam get-role --role-name github-actions-deploy-role --query 'Role.Arn' --out
 
 Add as `AWS_DEPLOY_ROLE_ARN`, plus: `VLLM_ENDPOINT`, `COGNITO_USER_POOL_ID`,
 `TAVILY_API_KEY`, `VPC_SUBNET_ID`, `VPC_SECURITY_GROUP_ID`, `EC2_INSTANCE_ID`,
-`GITHUB_TOKEN`, `GITLAB_TOKEN`.
+`GITHUB_TOKEN`, `GITLAB_TOKEN`, and the additional front-end/OAuth secrets listed in
+Section 18.
 
 ---
 
@@ -345,13 +363,15 @@ aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aw
 ### 13.4 `.gitlab-ci.yml` OIDC deploy job
 
 Already implemented in the accompanying `.gitlab-ci.yml`, using `id_tokens` and
-`sts assume-role-with-web-identity`.
+`sts assume-role-with-web-identity`. This same pattern is reused by the `deploy-frontend`
+job (Section 15) with its own `role-session-name` for auditability.
 
 ### 13.5 Required GitLab CI/CD variables
 
 `AWS_DEPLOY_ROLE_ARN`, `VLLM_ENDPOINT`, `COGNITO_USER_POOL_ID`, `TAVILY_API_KEY`,
 `VPC_SUBNET_ID`, `VPC_SECURITY_GROUP_ID`, `EC2_INSTANCE_ID`, `GITHUB_TOKEN`,
-`GITLAB_TOKEN` — mark as masked/protected.
+`GITLAB_TOKEN` — mark as masked/protected. See Section 18 for the additional
+front-end/OAuth variables.
 
 ---
 
@@ -362,7 +382,111 @@ Already implemented in the accompanying `.gitlab-ci.yml`, using `id_tokens` and
 - [ ] No static AWS access keys stored in either GitHub Secrets or GitLab CI/CD Variables
 - [ ] Deploy role permissions narrowed to least-privilege before production
 - [ ] Test stage (lint + pytest) must pass before deploy stage runs
-- [ ] Sensitive parameters (including GITHUB_TOKEN/GITLAB_TOKEN) marked as masked/protected
+- [ ] Sensitive parameters (including GITHUB_TOKEN/GITLAB_TOKEN and the new
+      GITHUB_OAUTH_CLIENT_SECRET) marked as masked/protected
+
+---
+
+## 15. Front-end deployment (S3 static hosting + config.js)
+
+`front-end/` contains three static files with no build step:
+
+- `index.html` — markup only.
+- `app.js` — all application logic (Cognito PKCE login, GitHub/GitLab "Connect" flows,
+  file upload, chat). Static and cacheable; never contains secrets.
+- `config.js` — a small `window.APP_CONFIG` object holding placeholder tokens
+  (`__LAMBDA_FUNCTION_URL__`, `__COGNITO_DOMAIN__`, `__COGNITO_CLIENT_ID__`,
+  `__GITHUB_OAUTH_CLIENT_ID__`, `__GITLAB_OAUTH_CLIENT_ID__`) that CI substitutes with
+  real values at deploy time via `sed`, then uploads alongside the other two files.
+
+Both `.github/workflows/deploy.yml` and `.gitlab-ci.yml` run a `deploy-frontend` job that:
+1. Resolves the live Lambda Function URL from the CloudFormation stack outputs.
+2. Substitutes all five placeholders into `front-end/config.js`.
+3. Runs `aws s3 sync front-end/ s3://$FRONTEND_BUCKET/ --delete`.
+4. Optionally invalidates a CloudFront distribution if `CLOUDFRONT_DISTRIBUTION_ID` is set.
+
+You must provision the `$FRONTEND_BUCKET` S3 bucket (and, optionally, a CloudFront
+distribution in front of it) yourself — this is not yet defined in `template.yaml`.
+
+---
+
+## 16. GitHub OAuth App setup (per-user "Connect GitHub")
+
+This is separate from the Cognito GitHub identity provider in Section 2.2. It lets an
+already-signed-in user additionally authorize the agent to read/write their own GitHub
+repositories, independent of the shared `GitHubToken` PAT in Section 4.
+
+1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
+2. Set **Authorization callback URL** to `https://yourapp.com/callback/github`.
+3. Request scopes `repo` and `read:user` (set at authorize-time by the front-end, not
+   here).
+4. Copy the generated **Client ID** and **Client Secret**.
+5. Create the DynamoDB table that stores per-user tokens:
+
+```bash
+aws dynamodb create-table \
+  --table-name user-integrations \
+  --attribute-definitions \
+      AttributeName=user_id,AttributeType=S \
+      AttributeName=provider,AttributeType=S \
+  --key-schema \
+      AttributeName=user_id,KeyType=HASH \
+      AttributeName=provider,KeyType=RANGE \
+  --billing-mode PAY_PER_REQUEST
+```
+
+(This table is also declared as `UserIntegrationsTable` in `template.yaml`, so a manual
+`sam deploy` will create it automatically — the command above is only needed if you want
+it to exist before the first deploy.)
+
+6. Pass the client ID/secret as SAM parameters:
+
+```bash
+sam deploy --parameter-overrides \
+  ... \
+  GitHubOAuthClientId=YOUR_GITHUB_OAUTH_CLIENT_ID \
+  GitHubOAuthClientSecret=YOUR_GITHUB_OAUTH_CLIENT_SECRET
+```
+
+The code-for-token exchange happens server-side in `back-end/github_oauth.py`
+(`handle_github_oauth_callback`), invoked from `lambda_function.py` via the
+`{"action": "github_oauth_callback"}` request — the client secret never reaches the
+browser.
+
+---
+
+## 17. GitLab OAuth application setup (per-user "Connect GitLab")
+
+1. Go to **GitLab → User Settings → Applications**.
+2. Set **Redirect URI** to `https://yourapp.com/callback/gitlab`.
+3. Under **Scopes**, select `api`, `read_repository`, and `write_repository`.
+4. Leave "Confidential" **unchecked** — this must be a public/native client so the
+   front-end can complete the full Authorization Code + PKCE exchange directly against
+   `https://gitlab.com/oauth/token` without a client secret.
+5. Copy the generated **Application ID** (there is no secret to store).
+6. Add it to your CI secrets as `GITLAB_OAUTH_CLIENT_ID` — it only needs to reach
+   `front-end/config.js` (Section 15); the back-end Lambda does not need it.
+
+---
+
+## 18. Consolidated secrets / variables reference
+
+| Name | Used by | Notes |
+|---|---|---|
+| `AWS_DEPLOY_ROLE_ARN` | GitHub Actions + GitLab CI | OIDC deploy role, no static keys |
+| `VLLM_ENDPOINT` | `deploy` job (SAM param) | |
+| `COGNITO_USER_POOL_ID` | `deploy` job (SAM param `UserPoolId`) | |
+| `TAVILY_API_KEY` | `deploy` job (SAM param) | |
+| `VPC_SUBNET_ID` / `VPC_SECURITY_GROUP_ID` | `deploy` job (SAM params) | |
+| `EC2_INSTANCE_ID` | `deploy` job (SAM param) | |
+| `GITHUB_TOKEN` / `GITLAB_TOKEN` | `deploy` job (SAM params) | Shared service-level PATs, Section 4 |
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | `deploy` job (SAM params) + `deploy-frontend` job | Per-user "Connect GitHub", Section 16 |
+| `GITLAB_OAUTH_CLIENT_ID` | `deploy-frontend` job only | Per-user "Connect GitLab", Section 17 (no secret needed) |
+| `COGNITO_DOMAIN` / `COGNITO_CLIENT_ID` | `deploy-frontend` job | Cognito Hosted UI, Section 2 |
+| `FRONTEND_BUCKET` | `deploy-frontend` job | S3 bucket for static hosting, Section 15 |
+| `CLOUDFRONT_DISTRIBUTION_ID` | `deploy-frontend` job | Optional; skips invalidation if unset |
+
+Mark every secret above as masked/protected in both GitHub and GitLab.
 
 ---
 
