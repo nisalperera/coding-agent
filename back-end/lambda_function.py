@@ -18,12 +18,16 @@ import logging
 import os
 from collections import defaultdict
 
+
 import boto3
 import jwt
 import urllib3
 import urllib.request
 
+
 from repo_tools import REPO_TOOL_FUNCS, REPO_TOOL_DEFINITIONS, REPO_RISKY_TOOLS
+from github_oauth import handle_github_oauth_callback
+
 
 VLLM_ENDPOINT = os.environ["VLLM_ENDPOINT"]
 VLLM_HEALTH_ENDPOINT = os.environ.get("VLLM_HEALTH_ENDPOINT", VLLM_ENDPOINT.rsplit("/v1/", 1)[0] + "/health")
@@ -33,28 +37,35 @@ REGION = os.environ.get("AWS_REGION", "us-east-1")
 TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
 EC2_INSTANCE_ID = os.environ["EC2_INSTANCE_ID"]
 
+
 STARTUP_BUDGET_S = int(os.environ.get("STARTUP_BUDGET_S", "120"))
 POLL_INTERVAL_S = 3
 RETRY_AFTER_S = 120
 
+
 JWKS_URL = "https://cognito-idp." + REGION + ".amazonaws.com/" + USER_POOL_ID + "/.well-known/jwks.json"
+
 
 http = urllib3.PoolManager()
 dynamodb = boto3.resource("dynamodb")
 pending_table = dynamodb.Table("pending-actions")
 ec2_client = boto3.client("ec2", region_name=REGION)
 
+
 logger = logging.getLogger("coding-agent")
 logger.setLevel(logging.INFO)
+
 
 RISKY_TOOLS = {"write_file", "run_shell"} | REPO_RISKY_TOOLS
 _jwks_cache = None
 _rate_limits = defaultdict(list)
 
+
 TOOLS = [{"type": "function", "function": {
     "name": "web_search", "description": "Search the web for current information",
     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}]
 TOOLS = TOOLS + REPO_TOOL_DEFINITIONS
+
 
 
 def log_event(level, message, **fields):
@@ -65,12 +76,14 @@ def log_event(level, message, **fields):
     }))
 
 
+
 def get_instance_state():
     resp = ec2_client.describe_instances(InstanceIds=[EC2_INSTANCE_ID])
     reservations = resp.get("Reservations", [])
     if not reservations or not reservations[0].get("Instances"):
         raise RuntimeError("Instance " + EC2_INSTANCE_ID + " not found")
     return reservations[0]["Instances"][0]["State"]["Name"]
+
 
 
 def is_vllm_ready():
@@ -81,6 +94,7 @@ def is_vllm_ready():
         return False
 
 
+
 def write_progress(response_stream, phase, elapsed, budget, message):
     pct = min(99, int((elapsed / budget) * 100))
     response_stream.write(json.dumps({
@@ -89,9 +103,11 @@ def write_progress(response_stream, phase, elapsed, budget, message):
     }).encode() + b"\n")
 
 
+
 def ensure_backend_ready(response_stream, trace_id):
     start_time = time.time()
     deadline = start_time + STARTUP_BUDGET_S
+
 
     try:
         state = get_instance_state()
@@ -99,16 +115,20 @@ def ensure_backend_ready(response_stream, trace_id):
         log_event(logging.ERROR, "ec2_check_failed", error=str(e), trace_id=trace_id)
         return False, "Could not reach EC2. Please try again in " + str(RETRY_AFTER_S // 60) + " minutes."
 
+
     log_event(logging.INFO, "ec2_state_checked", state=state, trace_id=trace_id)
+
 
     if state in ("shutting-down", "terminated"):
         log_event(logging.ERROR, "ec2_unavailable", state=state, trace_id=trace_id)
         return False, "Backend instance is unavailable. Contact support."
 
+
     if state == "stopped":
         log_event(logging.INFO, "ec2_starting", trace_id=trace_id)
         write_progress(response_stream, "starting_instance", 0, STARTUP_BUDGET_S, "Starting GPU instance...")
         ec2_client.start_instances(InstanceIds=[EC2_INSTANCE_ID])
+
 
     while state != "running":
         elapsed = time.time() - start_time
@@ -119,7 +139,9 @@ def ensure_backend_ready(response_stream, trace_id):
         time.sleep(POLL_INTERVAL_S)
         state = get_instance_state()
 
+
     log_event(logging.INFO, "ec2_running", trace_id=trace_id)
+
 
     while not is_vllm_ready():
         elapsed = time.time() - start_time
@@ -129,10 +151,12 @@ def ensure_backend_ready(response_stream, trace_id):
         write_progress(response_stream, "loading_model", elapsed, STARTUP_BUDGET_S, "Loading model onto GPU...")
         time.sleep(POLL_INTERVAL_S)
 
+
     elapsed = time.time() - start_time
     write_progress(response_stream, "ready", elapsed, STARTUP_BUDGET_S, "Backend ready.")
     log_event(logging.INFO, "vllm_ready", elapsed=round(elapsed, 1), trace_id=trace_id)
     return True, None
+
 
 
 def get_jwks():
@@ -141,6 +165,7 @@ def get_jwks():
         with urllib.request.urlopen(JWKS_URL) as r:
             _jwks_cache = json.loads(r.read())
     return _jwks_cache
+
 
 
 def verify_token(token):
@@ -152,6 +177,7 @@ def verify_token(token):
                        audience=None, options={"verify_aud": False})
 
 
+
 def check_rate_limit(user_id, max_requests=20, window_seconds=60):
     now = time.time()
     _rate_limits[user_id] = [t for t in _rate_limits[user_id] if now - t < window_seconds]
@@ -161,8 +187,10 @@ def check_rate_limit(user_id, max_requests=20, window_seconds=60):
     return True
 
 
+
 def owns_conversation(user_id, conversation_id):
     return True
+
 
 
 def web_search(query):
@@ -171,8 +199,10 @@ def web_search(query):
     return json.dumps([{"title": x["title"], "url": x["url"], "snippet": x["content"][:200]} for x in results])
 
 
+
 FUNCS = {"web_search": web_search}
 FUNCS.update(REPO_TOOL_FUNCS)
+
 
 
 def call_vllm(messages, tools=None, stream=False):
@@ -189,6 +219,7 @@ def call_vllm(messages, tools=None, stream=False):
     return resp
 
 
+
 @awslambda.streamifyResponse
 async def handler(event, response_stream, context):
     trace_id = str(uuid.uuid4())
@@ -196,20 +227,25 @@ async def handler(event, response_stream, context):
     auth_header = headers.get("authorization", "")
     token = auth_header.replace("Bearer ", "")
 
+
     try:
         claims = verify_token(token)
     except Exception:
         response_stream.write(b'{"error": "unauthorized"}')
         return
 
+
     user_id = claims["sub"]
+
 
     if not check_rate_limit(user_id):
         log_event(logging.WARNING, "rate_limit_exceeded", user_id=user_id, trace_id=trace_id)
         response_stream.write(b'{"error": "rate_limit_exceeded"}')
         return
 
+
     body = json.loads(event.get("body", "{}"))
+
 
     if body.get("action") == "approve_pending":
         action_id = body["action_id"]
@@ -226,10 +262,19 @@ async def handler(event, response_stream, context):
         response_stream.write(json.dumps({"result": str(result)}).encode())
         return
 
+
+    if body.get("action") == "github_oauth_callback":
+        status_code, result = handle_github_oauth_callback(body, user_id)
+        log_event(logging.INFO, "github_oauth_callback", user_id=user_id, status_code=status_code, trace_id=trace_id)
+        response_stream.write(json.dumps(result).encode())
+        return
+
+
     conversation_id = body.get("conversation_id")
     if conversation_id and not owns_conversation(user_id, conversation_id):
         response_stream.write(b'{"error": "forbidden"}')
         return
+
 
     ready, error_message = ensure_backend_ready(response_stream, trace_id)
     if not ready:
@@ -239,18 +284,22 @@ async def handler(event, response_stream, context):
         }).encode())
         return
 
+
     history = body.get("history", [])
     user_message = body.get("message", "")
     messages = history + [{"role": "user", "content": user_message}]
+
 
     first_resp = call_vllm(messages, tools=TOOLS, stream=False)
     result = json.loads(first_resp.data.decode())
     msg = result["choices"][0]["message"]
 
+
     if msg.get("tool_calls"):
         for call in msg["tool_calls"]:
             args = json.loads(call["function"]["arguments"])
             name = call["function"]["name"]
+
 
             if name in RISKY_TOOLS:
                 action_id = str(uuid.uuid4())
@@ -267,9 +316,11 @@ async def handler(event, response_stream, context):
                 }).encode())
                 return
 
+
             messages.append(msg)
             tool_result = FUNCS[name](**args)
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": str(tool_result)})
+
 
     log_event(logging.INFO, "chat_completion_started", user_id=user_id, trace_id=trace_id)
     response_stream.write(json.dumps({"type": "answer_start"}).encode() + b"\n")
@@ -283,5 +334,6 @@ async def handler(event, response_stream, context):
                         response_stream.write(("data: " + json.dumps({"token": delta}) + "\n\n").encode())
                 except (json.JSONDecodeError, KeyError):
                     continue
+
 
     response_stream.write(b"data: [DONE]\n\n")

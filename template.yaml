@@ -2,6 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: "[FINAL] Perplexity-style web app backend (Lambda + response streaming + EC2 auto-start + repo tools)"
 
+
 Parameters:
   VllmEndpoint:
     Type: String
@@ -26,6 +27,14 @@ Parameters:
     Type: String
     NoEcho: true
     Description: GitLab personal/project access token (api scope) for branch/MR/issue tools
+  GitHubOAuthClientId:
+    Type: String
+    Description: GitHub OAuth App client ID used for per-user "Connect GitHub" authorization
+  GitHubOAuthClientSecret:
+    Type: String
+    NoEcho: true
+    Description: GitHub OAuth App client secret (server-side code-for-token exchange only)
+
 
 Resources:
   PendingActionsTable:
@@ -42,6 +51,24 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: expires_at
         Enabled: true
+
+
+  UserIntegrationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: user-integrations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: provider
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: provider
+          KeyType: RANGE
+
 
   ChatFunction:
     Type: AWS::Serverless::Function
@@ -61,6 +88,9 @@ Resources:
           STARTUP_BUDGET_S: "120"
           GITHUB_TOKEN: !Ref GitHubToken
           GITLAB_TOKEN: !Ref GitLabToken
+          GITHUB_OAUTH_CLIENT_ID: !Ref GitHubOAuthClientId
+          GITHUB_OAUTH_CLIENT_SECRET: !Ref GitHubOAuthClientSecret
+          USER_INTEGRATIONS_TABLE: !Ref UserIntegrationsTable
       VpcConfig:
         SubnetIds:
           - !Ref SubnetId
@@ -69,6 +99,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PendingActionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserIntegrationsTable
         - Statement:
             - Effect: Allow
               Action:
@@ -81,6 +113,7 @@ Resources:
         Cors:
           AllowOrigins: ["*"]
           AllowMethods: ["POST"]
+
 
 Outputs:
   FunctionUrl:
