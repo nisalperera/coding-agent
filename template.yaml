@@ -141,11 +141,10 @@ Resources:
   # Custom domain (optional): if DomainName + HostedZoneId are supplied,
   # an ACM certificate is issued and DNS-validated automatically against
   # the existing Route 53 hosted zone (no manual steps), and a Route 53
-  # alias record points the domain at this distribution. HTTPS is not
-  # enforced (ViewerProtocolPolicy: allow-all) per requirements, so plain
-  # HTTP works too — the certificate is still required by CloudFront to
-  # accept a non-default domain name at all, but it costs nothing and
-  # needs no manual renewal.
+  # alias record points the domain at this distribution. HTTPS is
+  # enforced (ViewerProtocolPolicy: redirect-to-https) for both the
+  # default *.cloudfront.net domain and any custom domain — ACM
+  # certificates are free, so there is no reason not to use one.
   # ---------------------------------------------------------------------
   FrontendBucket:
     Type: AWS::S3::Bucket
@@ -204,7 +203,7 @@ Resources:
               OriginAccessIdentity: ""
         DefaultCacheBehavior:
           TargetOriginId: FrontendS3Origin
-          ViewerProtocolPolicy: allow-all
+          ViewerProtocolPolicy: redirect-to-https
           AllowedMethods: ["GET", "HEAD"]
           CachedMethods: ["GET", "HEAD"]
           Compress: true
@@ -257,4 +256,4 @@ Outputs:
     Value: !Sub "https://${FrontendDistribution.DomainName}"
   FrontendUrl:
     Description: Preferred front-end URL (custom domain if configured, else CloudFront domain)
-    Value: !If [HasCustomDomain, !Sub "http://${DomainName}", !Sub "https://${FrontendDistribution.DomainName}"]
+    Value: !If [HasCustomDomain, !Sub "https://${DomainName}", !Sub "https://${FrontendDistribution.DomainName}"]

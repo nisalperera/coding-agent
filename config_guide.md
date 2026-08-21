@@ -248,6 +248,8 @@ implemented by design.
       served only via CloudFront using Origin Access Control (OAC), never a public bucket policy
 - [x] Optional custom-domain certificate is DNS-validated automatically against the caller's
       own Route 53 hosted zone — no manual approval step, no long-lived unmanaged credentials
+- [x] HTTPS is enforced end-to-end for the front-end (`ViewerProtocolPolicy: redirect-to-https`),
+      on both the default CloudFront domain and any custom domain, backed by a free ACM certificate
 
 ---
 
@@ -260,8 +262,6 @@ implemented by design.
 - Add OpenTelemetry exporter configuration for full distributed tracing.
 - Per-user GitHub OAuth tokens (Section 16) currently have no refresh/expiry handling and
   no scoped revocation endpoint exposed to the user beyond clearing local browser storage.
-- The front-end is served over plain HTTP by design (Section 19.4); if that changes,
-  flip `ViewerProtocolPolicy` to `redirect-to-https` in `template.yaml`.
 
 ---
 
@@ -429,8 +429,9 @@ created by hand:
 - `FrontendOriginAccessControl` + `FrontendBucketPolicy` — CloudFront reaches the bucket
   using an Origin Access Control (OAC) signed request; the bucket policy only trusts the
   specific `FrontendDistribution` ARN.
-- `FrontendDistribution` — a CloudFront distribution with `DefaultRootObject: index.html`
-  and `CustomErrorResponses` mapping both 403 and 404 back to `/index.html` with a 200
+- `FrontendDistribution` — a CloudFront distribution with `DefaultRootObject: index.html`,
+  `ViewerProtocolPolicy: redirect-to-https` (HTTPS enforced everywhere), and
+  `CustomErrorResponses` mapping both 403 and 404 back to `/index.html` with a 200
   status, so client-side routes like `/callback`, `/callback/github`, and
   `/callback/gitlab` resolve to the single-page app instead of an S3 error page.
 - Optionally, `FrontendCertificate` + `FrontendDnsRecord` — see Section 19.
@@ -440,8 +441,8 @@ exposes outputs consumed by CI:
 
 - `FrontendBucketName`
 - `FrontendDistributionId`
-- `FrontendCloudFrontDomain` (always the raw `*.cloudfront.net` address)
-- `FrontendUrl` (preferred URL — your custom domain if configured, else the CloudFront domain)
+- `FrontendCloudFrontDomain` (always the raw `*.cloudfront.net` address, `https://`)
+- `FrontendUrl` (preferred URL — your custom domain if configured, else the CloudFront domain, always `https://`)
 
 Both `.github/workflows/deploy.yml` and `.gitlab-ci.yml` run a `deploy-frontend` job
 (after `deploy` succeeds) that:
@@ -462,8 +463,9 @@ already-signed-in user additionally authorize the agent to read/write their own 
 repositories, independent of the shared `GitHubToken` PAT in Section 4.
 
 1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
-2. Set **Authorization callback URL** to `<FrontendUrl output>/callback/github` (your
-   custom domain if configured per Section 19, otherwise the CloudFront domain).
+2. Set **Authorization callback URL** to `<FrontendUrl output>/callback/github` (always
+   `https://` — your custom domain if configured per Section 19, otherwise the CloudFront
+   domain).
 3. Request scopes `repo` and `read:user` (set at authorize-time by the front-end, not
    here).
 4. Copy the generated **Client ID** and **Client Secret**.
@@ -489,7 +491,7 @@ browser.
 ## 17. GitLab OAuth application setup (per-user "Connect GitLab")
 
 1. Go to **GitLab → User Settings → Applications**.
-2. Set **Redirect URI** to `<FrontendUrl output>/callback/gitlab`.
+2. Set **Redirect URI** to `<FrontendUrl output>/callback/gitlab` (always `https://`).
 3. Under **Scopes**, select `api`, `read_repository`, and `write_repository`.
 4. Leave "Confidential" **unchecked** — this must be a public/native client so the
    front-end can complete the full Authorization Code + PKCE exchange directly against
@@ -524,7 +526,7 @@ Mark every secret above as masked/protected in both GitHub and GitLab.
 
 ---
 
-## 19. Custom domain via an existing Route 53 hosted zone (optional, no manual HTTPS setup)
+## 19. Custom domain via an existing Route 53 hosted zone (optional, HTTPS enforced)
 
 If you already own a domain in Route 53 and want the front-end reachable at that domain
 instead of the default `*.cloudfront.net` address, set two extra SAM parameters —
@@ -561,31 +563,20 @@ and the stack behaves exactly as before, serving only the CloudFront default dom
   CloudFormation creates the required validation CNAME directly in your existing Route 53
   hosted zone (via `DomainValidationOptions.HostedZoneId`) and waits for the certificate
   to be issued before continuing. No manual DNS edits, no email/console approval step.
+  ACM certificates are free and auto-renew, so there is no reason not to use one.
 - `FrontendDistribution.Aliases` / `ViewerCertificate` — the CloudFront distribution is
   updated to accept your custom domain and present the new certificate over TLS.
 - `FrontendDnsRecord` (`AWS::Route53::RecordSet`, type `A`, alias) — points
   `agent.yourdomain.com` at the CloudFront distribution, using CloudFront's fixed global
   hosted zone ID (`Z2FDTNDATAQYW2`) as the alias target zone.
 
-### 19.4 About "don't need HTTPS"
+### 19.4 HTTPS is enforced everywhere
 
-CloudFront still requires a valid ACM certificate to accept *any* custom domain name —
-that's a CloudFront platform requirement, not something this stack adds on top. The good
-news is the certificate above is free, auto-renewing, and requires zero manual work given
-your existing Route 53 zone.
-
-What you *don't* get forced into is an HTTPS redirect: `DefaultCacheBehavior.ViewerProtocolPolicy`
-is set to `allow-all`, so `http://agent.yourdomain.com` works exactly like
-`https://agent.yourdomain.com` — visitors are never redirected or blocked for using plain
-HTTP. The `FrontendUrl` stack output reflects this and returns the `http://` form of your
-custom domain once one is configured.
-
-One practical note: the front-end's OAuth flows (Cognito Hosted UI, GitHub, GitLab) all
-redirect back to `<domain>/callback`, `<domain>/callback/github`, `<domain>/callback/gitlab`.
-Some identity providers (Cognito Hosted UI in particular) may reject `http://` callback
-URLs outright — if you hit that, register the callback URLs as `https://` (the cert is
-already there and CloudFront will terminate TLS for you) while still allowing plain HTTP
-for everything else.
+`DefaultCacheBehavior.ViewerProtocolPolicy` is set to `redirect-to-https`, so any plain
+HTTP request — to either the default `*.cloudfront.net` domain or a configured custom
+domain — is redirected to HTTPS automatically. There is no HTTP-only mode. Every OAuth
+callback URL you register (Cognito Hosted UI, GitHub OAuth App, GitLab application) should
+therefore always use `https://`, matching the `FrontendUrl` stack output.
 
 ---
 
