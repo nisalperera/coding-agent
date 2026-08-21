@@ -53,31 +53,34 @@ aws cognito-idp create-identity-provider \
   --attribute-mapping '{"email": "email", "name": "name"}'
 ```
 
-### 2.2 Register GitHub as an OIDC identity provider
+### 2.2 GitHub as a Cognito identity provider — not supported, do not attempt
 
-```bash
-aws cognito-idp create-identity-provider \
-  --user-pool-id us-east-1_xxxxxxx \
-  --provider-name GitHub \
-  --provider-type OIDC \
-  --provider-details '{
-    "client_id": "YOUR_GITHUB_CLIENT_ID",
-    "client_secret": "YOUR_GITHUB_CLIENT_SECRET",
-    "authorize_scopes": "openid user:email",
-    "oidc_issuer": "https://github.com",
-    "authorize_url": "https://github.com/login/oauth/authorize",
-    "token_url": "https://github.com/login/oauth/access_token",
-    "attributes_url": "https://api.github.com/user"
-  }' \
-  --attribute-mapping '{"email": "email", "username": "login"}'
-```
+An earlier version of this guide documented registering GitHub as an `OIDC` identity
+provider directly in Cognito. **This does not work and cannot be made to work.**
 
-Note: GitHub's OAuth implementation does not fully comply with OIDC discovery. Test early.
+Whenever `oidc_issuer` is set on a Cognito identity provider, Cognito unconditionally
+fetches `<oidc_issuer>/.well-known/openid-configuration` to validate it — regardless of
+whether you also supply explicit `authorize_url`/`token_url`/`attributes_url`. GitHub does
+not expose `https://github.com/.well-known/openid-configuration` (its OAuth
+implementation has never been fully OIDC-compliant), so `create-identity-provider` always
+fails with `InvalidParameterException: Unable to contact well-known endpoint`, no matter
+what combination of parameters you pass.
 
-> This GitHub identity provider is only used to let a user **sign in to the coding
-> agent itself** via Cognito Hosted UI. It is separate from the per-user "Connect
-> GitHub" repository-authorization feature covered in Section 16 — that flow uses its
-> own, independent GitHub OAuth App and never touches Cognito.
+**What to do instead:** don't federate GitHub through Cognito at all.
+
+- For **signing in to the coding agent itself**, offer only "Sign in with Google" (Section
+  2.1) — Google is fully OIDC-compliant and works exactly as documented.
+- For **GitHub repository access**, use the separate, already-working "Connect GitHub"
+  OAuth App flow described in Section 16 (`back-end/github_oauth.py`). It talks to GitHub
+  directly with a plain OAuth 2.0 Authorization Code exchange and never goes through
+  Cognito's OIDC validator, so it isn't affected by this limitation.
+
+If you ever want "Sign in with GitHub" as an identity/login option (not just repo access),
+the only viable path is hosting your own OIDC discovery-document shim (a small Lambda/API
+Gateway or static JSON file that serves a synthetic `/.well-known/openid-configuration`
+pointing at GitHub's real endpoints, with `oidc_issuer` set to the shim's own URL instead
+of `github.com`) — this is genuine additional infrastructure, not a configuration fix, and
+is not implemented in this project.
 
 ### 2.3 Create the app client (public client, PKCE-ready)
 
@@ -86,13 +89,16 @@ aws cognito-idp create-user-pool-client \
   --user-pool-id us-east-1_xxxxxxx \
   --client-name coding-agent-client \
   --no-generate-secret \
-  --supported-identity-providers COGNITO Google GitHub \
+  --supported-identity-providers COGNITO Google \
   --allowed-o-auth-flows code \
   --allowed-o-auth-scopes openid email profile \
   --allowed-o-auth-flows-user-pool-client \
   --callback-urls '["https://yourapp.com/callback","http://localhost:8765/callback"]' \
   --logout-urls '["https://yourapp.com/logout","http://localhost:8765/logout"]'
 ```
+
+`--supported-identity-providers` lists only `COGNITO` (native username/password) and
+`Google` — `GitHub` is deliberately absent per Section 2.2.
 
 ### 2.4 Set up the Cognito Hosted UI domain
 
@@ -259,12 +265,16 @@ implemented by design.
       own Route 53 hosted zone — no manual approval step, no long-lived unmanaged credentials
 - [x] HTTPS is enforced end-to-end for the front-end (`ViewerProtocolPolicy: redirect-to-https`),
       on both the default CloudFront domain and any custom domain, backed by a free ACM certificate
+- [x] GitHub is never federated through Cognito (Section 2.2) — repository OAuth for GitHub is
+      isolated to the dedicated `github_oauth.py` flow, which does not depend on GitHub exposing
+      OIDC discovery metadata it doesn't actually support
 
 ---
 
 ## 11. Known gaps to close before production
 
-- GitHub OIDC compliance with Cognito needs manual verification.
+- ~~GitHub OIDC compliance with Cognito needs manual verification.~~ — resolved: confirmed
+  unworkable (Section 2.2); GitHub is not federated through Cognito at all.
 - In-memory rate limiting must move to DynamoDB for multi-instance correctness.
 - GitHub/GitLab tokens currently use broad PAT scopes; narrow to fine-grained,
   repo-specific tokens before production use.
@@ -481,9 +491,10 @@ both are resolved dynamically from the stack at deploy time.
 
 ## 16. GitHub OAuth App setup (per-user "Connect GitHub")
 
-This is separate from the Cognito GitHub identity provider in Section 2.2. It lets an
-already-signed-in user additionally authorize the agent to read/write their own GitHub
-repositories, independent of the shared `GitHubToken` PAT in Section 4.
+This is the **only** GitHub OAuth integration in this project (see Section 2.2 for why
+GitHub is never federated through Cognito). It lets an already-signed-in user
+additionally authorize the agent to read/write their own GitHub repositories,
+independent of the shared `GitHubToken` PAT in Section 4.
 
 1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
 2. Set **Authorization callback URL** to `<FrontendUrl output>/callback/github` (always
@@ -510,6 +521,10 @@ The code-for-token exchange happens server-side in `back-end/github_oauth.py`
 (`handle_github_oauth_callback`), invoked from `lambda_function.py` via the
 `{"action": "github_oauth_callback"}` request — the client secret never reaches the
 browser.
+
+> If you ever pasted a GitHub OAuth Client Secret into a chat, terminal log, or committed
+> file by mistake, treat it as compromised: regenerate it immediately from the OAuth App's
+> settings page and update the corresponding secret before redeploying.
 
 ---
 
