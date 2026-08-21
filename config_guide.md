@@ -163,10 +163,11 @@ sam deploy --guided
 
 Prompted for: `VllmEndpoint`, `UserPoolId`, `TavilyApiKey`, `SubnetId`, `SecurityGroupId`,
 `Ec2InstanceId`, `GitHubToken`, `GitLabToken`, `GitHubOAuthClientId`, `GitHubOAuthClientSecret`
-(see Section 16). This same `sam deploy` now also provisions the front-end's S3 bucket and
-CloudFront distribution (Section 15) — there is nothing left to create manually for hosting.
-The Lambda Function URL is never hand-edited into `index.html`; it is injected automatically
-into `front-end/config.js` by the CI/CD front-end deploy job.
+(see Section 16), and optionally `DomainName`/`HostedZoneId` (see Section 19). This same
+`sam deploy` now also provisions the front-end's S3 bucket and CloudFront distribution
+(Section 15) — there is nothing left to create manually for hosting. The Lambda Function
+URL is never hand-edited into `index.html`; it is injected automatically into
+`front-end/config.js` by the CI/CD front-end deploy job.
 
 ---
 
@@ -245,6 +246,8 @@ implemented by design.
       no client secret, appropriate for a public client
 - [x] Front-end S3 bucket is fully private (all four Public Access Block settings enabled);
       served only via CloudFront using Origin Access Control (OAC), never a public bucket policy
+- [x] Optional custom-domain certificate is DNS-validated automatically against the caller's
+      own Route 53 hosted zone — no manual approval step, no long-lived unmanaged credentials
 
 ---
 
@@ -257,8 +260,8 @@ implemented by design.
 - Add OpenTelemetry exporter configuration for full distributed tracing.
 - Per-user GitHub OAuth tokens (Section 16) currently have no refresh/expiry handling and
   no scoped revocation endpoint exposed to the user beyond clearing local browser storage.
-- CloudFront currently serves its default `*.cloudfront.net` domain with the default
-  certificate; add a custom domain + ACM certificate before production.
+- The front-end is served over plain HTTP by design (Section 19.4); if that changes,
+  flip `ViewerProtocolPolicy` to `redirect-to-https` in `template.yaml`.
 
 ---
 
@@ -310,7 +313,10 @@ aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn a
 
 `CloudFrontFullAccess` is required so the `deploy` job can create/update the
 `FrontendDistribution` and the `deploy-frontend` job can call
-`cloudfront create-invalidation` (Section 15). Replace these broad policies with a
+`cloudfront create-invalidation` (Section 15). If you use the optional custom domain
+(Section 19), also attach `arn:aws:iam::aws:policy/AWSCertificateManagerFullAccess` and
+`arn:aws:iam::aws:policy/AmazonRoute53FullAccess` so the deploy role can create the ACM
+certificate and Route 53 alias record. Replace these broad policies with a
 least-privilege custom policy before production.
 
 ### 12.4 Get the role ARN and add it to GitHub Secrets
@@ -370,6 +376,10 @@ aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aw
 aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/IAMFullAccess
 ```
 
+If you use the optional custom domain (Section 19), also attach
+`arn:aws:iam::aws:policy/AWSCertificateManagerFullAccess` and
+`arn:aws:iam::aws:policy/AmazonRoute53FullAccess`.
+
 ### 13.4 `.gitlab-ci.yml` OIDC deploy job
 
 Already implemented in the accompanying `.gitlab-ci.yml`, using `id_tokens` and
@@ -381,7 +391,7 @@ job (Section 15) with its own `role-session-name` for auditability.
 `AWS_DEPLOY_ROLE_ARN`, `VLLM_ENDPOINT`, `COGNITO_USER_POOL_ID`, `TAVILY_API_KEY`,
 `VPC_SUBNET_ID`, `VPC_SECURITY_GROUP_ID`, `EC2_INSTANCE_ID`, `GITHUB_TOKEN`,
 `GITLAB_TOKEN` — mark as masked/protected. See Section 18 for the additional
-front-end/OAuth variables.
+front-end/OAuth/domain variables.
 
 ---
 
@@ -423,13 +433,15 @@ created by hand:
   and `CustomErrorResponses` mapping both 403 and 404 back to `/index.html` with a 200
   status, so client-side routes like `/callback`, `/callback/github`, and
   `/callback/gitlab` resolve to the single-page app instead of an S3 error page.
+- Optionally, `FrontendCertificate` + `FrontendDnsRecord` — see Section 19.
 
 `sam deploy` (Section 5) creates/updates all of the above automatically. The stack then
-exposes three outputs consumed by CI:
+exposes outputs consumed by CI:
 
 - `FrontendBucketName`
 - `FrontendDistributionId`
-- `FrontendUrl` (the `https://<distribution>.cloudfront.net` address to share with users)
+- `FrontendCloudFrontDomain` (always the raw `*.cloudfront.net` address)
+- `FrontendUrl` (preferred URL — your custom domain if configured, else the CloudFront domain)
 
 Both `.github/workflows/deploy.yml` and `.gitlab-ci.yml` run a `deploy-frontend` job
 (after `deploy` succeeds) that:
@@ -450,8 +462,8 @@ already-signed-in user additionally authorize the agent to read/write their own 
 repositories, independent of the shared `GitHubToken` PAT in Section 4.
 
 1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
-2. Set **Authorization callback URL** to `https://<your-cloudfront-domain>/callback/github`
-   (use the `FrontendUrl` stack output from Section 15, or your custom domain).
+2. Set **Authorization callback URL** to `<FrontendUrl output>/callback/github` (your
+   custom domain if configured per Section 19, otherwise the CloudFront domain).
 3. Request scopes `repo` and `read:user` (set at authorize-time by the front-end, not
    here).
 4. Copy the generated **Client ID** and **Client Secret**.
@@ -477,7 +489,7 @@ browser.
 ## 17. GitLab OAuth application setup (per-user "Connect GitLab")
 
 1. Go to **GitLab → User Settings → Applications**.
-2. Set **Redirect URI** to `https://<your-cloudfront-domain>/callback/gitlab`.
+2. Set **Redirect URI** to `<FrontendUrl output>/callback/gitlab`.
 3. Under **Scopes**, select `api`, `read_repository`, and `write_repository`.
 4. Leave "Confidential" **unchecked** — this must be a public/native client so the
    front-end can complete the full Authorization Code + PKCE exchange directly against
@@ -502,6 +514,7 @@ browser.
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | `deploy` job (SAM params) + `deploy-frontend` job | Per-user "Connect GitHub", Section 16 |
 | `GITLAB_OAUTH_CLIENT_ID` | `deploy-frontend` job only | Per-user "Connect GitLab", Section 17 (no secret needed) |
 | `COGNITO_DOMAIN` / `COGNITO_CLIENT_ID` | `deploy-frontend` job | Cognito Hosted UI, Section 2 |
+| `FRONTEND_DOMAIN_NAME` / `FRONTEND_HOSTED_ZONE_ID` | `deploy` job (SAM params `DomainName`/`HostedZoneId`) | Optional; leave both unset to use the default `*.cloudfront.net` domain. Section 19 |
 
 `FRONTEND_BUCKET` and `CLOUDFRONT_DISTRIBUTION_ID` are **no longer secrets** — both are
 now CloudFormation-managed (`FrontendBucket`, `FrontendDistribution` in `template.yaml`,
@@ -510,3 +523,71 @@ Section 15) and resolved dynamically by CI from the stack outputs.
 Mark every secret above as masked/protected in both GitHub and GitLab.
 
 ---
+
+## 19. Custom domain via an existing Route 53 hosted zone (optional, no manual HTTPS setup)
+
+If you already own a domain in Route 53 and want the front-end reachable at that domain
+instead of the default `*.cloudfront.net` address, set two extra SAM parameters —
+everything else (certificate issuance, DNS validation, the alias record) is fully
+automated by `template.yaml` via the `HasCustomDomain` condition.
+
+### 19.1 Find your hosted zone ID
+
+```bash
+aws route53 list-hosted-zones-by-name \
+  --dns-name yourdomain.com \
+  --query "HostedZones[0].Id" --output text
+```
+
+This returns something like `/hostedzone/Z1234567890ABC` — strip the `/hostedzone/`
+prefix when passing it as `HostedZoneId` below.
+
+### 19.2 Deploy with the domain parameters
+
+```bash
+sam deploy --parameter-overrides \
+  ... \
+  DomainName=agent.yourdomain.com \
+  HostedZoneId=Z1234567890ABC
+```
+
+Or add `FRONTEND_DOMAIN_NAME` and `FRONTEND_HOSTED_ZONE_ID` as CI secrets/variables — see
+Section 18. Leaving both blank (the default) skips all custom-domain resources entirely
+and the stack behaves exactly as before, serving only the CloudFront default domain.
+
+### 19.3 What gets created automatically
+
+- `FrontendCertificate` (`AWS::CertificateManager::Certificate`, `ValidationMethod: DNS`) —
+  CloudFormation creates the required validation CNAME directly in your existing Route 53
+  hosted zone (via `DomainValidationOptions.HostedZoneId`) and waits for the certificate
+  to be issued before continuing. No manual DNS edits, no email/console approval step.
+- `FrontendDistribution.Aliases` / `ViewerCertificate` — the CloudFront distribution is
+  updated to accept your custom domain and present the new certificate over TLS.
+- `FrontendDnsRecord` (`AWS::Route53::RecordSet`, type `A`, alias) — points
+  `agent.yourdomain.com` at the CloudFront distribution, using CloudFront's fixed global
+  hosted zone ID (`Z2FDTNDATAQYW2`) as the alias target zone.
+
+### 19.4 About "don't need HTTPS"
+
+CloudFront still requires a valid ACM certificate to accept *any* custom domain name —
+that's a CloudFront platform requirement, not something this stack adds on top. The good
+news is the certificate above is free, auto-renewing, and requires zero manual work given
+your existing Route 53 zone.
+
+What you *don't* get forced into is an HTTPS redirect: `DefaultCacheBehavior.ViewerProtocolPolicy`
+is set to `allow-all`, so `http://agent.yourdomain.com` works exactly like
+`https://agent.yourdomain.com` — visitors are never redirected or blocked for using plain
+HTTP. The `FrontendUrl` stack output reflects this and returns the `http://` form of your
+custom domain once one is configured.
+
+One practical note: the front-end's OAuth flows (Cognito Hosted UI, GitHub, GitLab) all
+redirect back to `<domain>/callback`, `<domain>/callback/github`, `<domain>/callback/gitlab`.
+Some identity providers (Cognito Hosted UI in particular) may reject `http://` callback
+URLs outright — if you hit that, register the callback URLs as `https://` (the cert is
+already there and CloudFront will terminate TLS for you) while still allowing plain HTTP
+for everything else.
+
+---
+
+*This document, and the accompanying code package, are marked FINAL as of the version
+delivered in this session.*

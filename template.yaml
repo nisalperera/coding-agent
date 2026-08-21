@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: "Perplexity-style web app backend (Lambda + response streaming + EC2 auto-start + repo tools + front-end hosting)"
+Description: "[FINAL] Perplexity-style web app backend (Lambda + response streaming + EC2 auto-start + repo tools + front-end hosting)"
 
 
 Parameters:
@@ -34,6 +34,22 @@ Parameters:
     Type: String
     NoEcho: true
     Description: GitHub OAuth App client secret (server-side code-for-token exchange only)
+  DomainName:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional custom domain for the front-end (e.g. agent.example.com), already
+      registered in Route 53. Leave blank to use the default *.cloudfront.net domain.
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: >-
+      Route 53 hosted zone ID that owns DomainName. Required only if DomainName is set;
+      used to auto-validate the ACM certificate and create the DNS alias record.
+
+
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref DomainName, ""]]
 
 
 Resources:
@@ -121,6 +137,15 @@ Resources:
   # CustomErrorResponses map 403/404 back to /index.html so client-side
   # routes (/callback, /callback/github, /callback/gitlab) resolve to the
   # single-page app instead of returning a raw S3 error.
+  #
+  # Custom domain (optional): if DomainName + HostedZoneId are supplied,
+  # an ACM certificate is issued and DNS-validated automatically against
+  # the existing Route 53 hosted zone (no manual steps), and a Route 53
+  # alias record points the domain at this distribution. HTTPS is not
+  # enforced (ViewerProtocolPolicy: allow-all) per requirements, so plain
+  # HTTP works too — the certificate is still required by CloudFront to
+  # accept a non-default domain name at all, but it costs nothing and
+  # needs no manual renewal.
   # ---------------------------------------------------------------------
   FrontendBucket:
     Type: AWS::S3::Bucket
@@ -145,6 +170,16 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
+  FrontendCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -154,6 +189,13 @@ Resources:
         DefaultRootObject: index.html
         HttpVersion: http2
         PriceClass: PriceClass_100
+        Aliases: !If [HasCustomDomain, [!Ref DomainName], !Ref "AWS::NoValue"]
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref FrontendCertificate
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - !Ref "AWS::NoValue"
         Origins:
           - Id: FrontendS3Origin
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
@@ -162,7 +204,7 @@ Resources:
               OriginAccessIdentity: ""
         DefaultCacheBehavior:
           TargetOriginId: FrontendS3Origin
-          ViewerProtocolPolicy: redirect-to-https
+          ViewerProtocolPolicy: allow-all
           AllowedMethods: ["GET", "HEAD"]
           CachedMethods: ["GET", "HEAD"]
           Compress: true
@@ -191,6 +233,17 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
 
+  FrontendDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt FrontendDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2  # fixed, global CloudFront hosted zone ID
+
 
 Outputs:
   FunctionUrl:
@@ -199,5 +252,9 @@ Outputs:
     Value: !Ref FrontendBucket
   FrontendDistributionId:
     Value: !Ref FrontendDistribution
-  FrontendUrl:
+  FrontendCloudFrontDomain:
+    Description: Always-available *.cloudfront.net domain, regardless of custom domain
     Value: !Sub "https://${FrontendDistribution.DomainName}"
+  FrontendUrl:
+    Description: Preferred front-end URL (custom domain if configured, else CloudFront domain)
+    Value: !If [HasCustomDomain, !Sub "http://${DomainName}", !Sub "https://${FrontendDistribution.DomainName}"]
