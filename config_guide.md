@@ -1,4 +1,4 @@
-# AWS Configuration Guide [FINAL]
+# AWS Configuration Guide
 
 Complete setup steps for deploying the Qwen3-Coder-14B serving stack: vLLM on a T4 EC2
 instance, an authenticated Lambda-based web app, and a CLI coding agent, following
