@@ -163,9 +163,10 @@ sam deploy --guided
 
 Prompted for: `VllmEndpoint`, `UserPoolId`, `TavilyApiKey`, `SubnetId`, `SecurityGroupId`,
 `Ec2InstanceId`, `GitHubToken`, `GitLabToken`, `GitHubOAuthClientId`, `GitHubOAuthClientSecret`
-(see Section 16). The Lambda Function URL is no longer hand-edited into `index.html` —
-it is injected automatically into `front-end/config.js` by the CI/CD front-end deploy job
-(see Section 15).
+(see Section 16). This same `sam deploy` now also provisions the front-end's S3 bucket and
+CloudFront distribution (Section 15) — there is nothing left to create manually for hosting.
+The Lambda Function URL is never hand-edited into `index.html`; it is injected automatically
+into `front-end/config.js` by the CI/CD front-end deploy job.
 
 ---
 
@@ -242,6 +243,8 @@ implemented by design.
 - [x] Per-user GitHub/GitLab OAuth tokens stored server-side in DynamoDB, never in the browser
       for GitHub (client secret never leaves the Lambda); GitLab uses browser-side PKCE with
       no client secret, appropriate for a public client
+- [x] Front-end S3 bucket is fully private (all four Public Access Block settings enabled);
+      served only via CloudFront using Origin Access Control (OAC), never a public bucket policy
 
 ---
 
@@ -254,6 +257,8 @@ implemented by design.
 - Add OpenTelemetry exporter configuration for full distributed tracing.
 - Per-user GitHub OAuth tokens (Section 16) currently have no refresh/expiry handling and
   no scoped revocation endpoint exposed to the user beyond clearing local browser storage.
+- CloudFront currently serves its default `*.cloudfront.net` domain with the default
+  certificate; add a custom domain + ACM certificate before production.
 
 ---
 
@@ -299,10 +304,14 @@ aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn a
 aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSLambda_FullAccess
 aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
 aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
+aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/CloudFrontFullAccess
 aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/IAMFullAccess
 ```
 
-Replace these broad policies with a least-privilege custom policy before production.
+`CloudFrontFullAccess` is required so the `deploy` job can create/update the
+`FrontendDistribution` and the `deploy-frontend` job can call
+`cloudfront create-invalidation` (Section 15). Replace these broad policies with a
+least-privilege custom policy before production.
 
 ### 12.4 Get the role ARN and add it to GitHub Secrets
 
@@ -357,6 +366,7 @@ aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aw
 aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSLambda_FullAccess
 aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
 aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
+aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/CloudFrontFullAccess
 aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/IAMFullAccess
 ```
 
@@ -384,10 +394,12 @@ front-end/OAuth variables.
 - [ ] Test stage (lint + pytest) must pass before deploy stage runs
 - [ ] Sensitive parameters (including GITHUB_TOKEN/GITLAB_TOKEN and the new
       GITHUB_OAUTH_CLIENT_SECRET) marked as masked/protected
+- [ ] `deploy-frontend` runs only after `deploy` succeeds (`needs: deploy`), since it reads
+      the S3 bucket name and CloudFront distribution ID from that stack's outputs
 
 ---
 
-## 15. Front-end deployment (S3 static hosting + config.js)
+## 15. Front-end deployment (S3 + CloudFront, defined in template.yaml)
 
 `front-end/` contains three static files with no build step:
 
@@ -397,16 +409,37 @@ front-end/OAuth variables.
 - `config.js` — a small `window.APP_CONFIG` object holding placeholder tokens
   (`__LAMBDA_FUNCTION_URL__`, `__COGNITO_DOMAIN__`, `__COGNITO_CLIENT_ID__`,
   `__GITHUB_OAUTH_CLIENT_ID__`, `__GITLAB_OAUTH_CLIENT_ID__`) that CI substitutes with
-  real values at deploy time via `sed`, then uploads alongside the other two files.
+  real values at deploy time via `sed`.
 
-Both `.github/workflows/deploy.yml` and `.gitlab-ci.yml` run a `deploy-frontend` job that:
-1. Resolves the live Lambda Function URL from the CloudFormation stack outputs.
-2. Substitutes all five placeholders into `front-end/config.js`.
-3. Runs `aws s3 sync front-end/ s3://$FRONTEND_BUCKET/ --delete`.
-4. Optionally invalidates a CloudFront distribution if `CLOUDFRONT_DISTRIBUTION_ID` is set.
+Hosting infrastructure is now IaC-managed in `template.yaml`, so nothing needs to be
+created by hand:
 
-You must provision the `$FRONTEND_BUCKET` S3 bucket (and, optionally, a CloudFront
-distribution in front of it) yourself — this is not yet defined in `template.yaml`.
+- `FrontendBucket` — a fully private S3 bucket (all four Public Access Block settings
+  enabled, SSE-S3 encryption). It is never addressed directly by browsers.
+- `FrontendOriginAccessControl` + `FrontendBucketPolicy` — CloudFront reaches the bucket
+  using an Origin Access Control (OAC) signed request; the bucket policy only trusts the
+  specific `FrontendDistribution` ARN.
+- `FrontendDistribution` — a CloudFront distribution with `DefaultRootObject: index.html`
+  and `CustomErrorResponses` mapping both 403 and 404 back to `/index.html` with a 200
+  status, so client-side routes like `/callback`, `/callback/github`, and
+  `/callback/gitlab` resolve to the single-page app instead of an S3 error page.
+
+`sam deploy` (Section 5) creates/updates all of the above automatically. The stack then
+exposes three outputs consumed by CI:
+
+- `FrontendBucketName`
+- `FrontendDistributionId`
+- `FrontendUrl` (the `https://<distribution>.cloudfront.net` address to share with users)
+
+Both `.github/workflows/deploy.yml` and `.gitlab-ci.yml` run a `deploy-frontend` job
+(after `deploy` succeeds) that:
+1. Reads `FrontendBucketName`/`FrontendDistributionId` from the stack outputs above.
+2. Substitutes all five `config.js` placeholders using CI secrets/variables.
+3. Runs `aws s3 sync front-end/ s3://$BUCKET_NAME/ --delete`.
+4. Runs `aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*"`.
+
+There is no `FRONTEND_BUCKET` or `CLOUDFRONT_DISTRIBUTION_ID` secret to manage anymore —
+both are resolved dynamically from the stack at deploy time.
 
 ---
 
@@ -417,28 +450,14 @@ already-signed-in user additionally authorize the agent to read/write their own 
 repositories, independent of the shared `GitHubToken` PAT in Section 4.
 
 1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
-2. Set **Authorization callback URL** to `https://yourapp.com/callback/github`.
+2. Set **Authorization callback URL** to `https://<your-cloudfront-domain>/callback/github`
+   (use the `FrontendUrl` stack output from Section 15, or your custom domain).
 3. Request scopes `repo` and `read:user` (set at authorize-time by the front-end, not
    here).
 4. Copy the generated **Client ID** and **Client Secret**.
-5. Create the DynamoDB table that stores per-user tokens:
-
-```bash
-aws dynamodb create-table \
-  --table-name user-integrations \
-  --attribute-definitions \
-      AttributeName=user_id,AttributeType=S \
-      AttributeName=provider,AttributeType=S \
-  --key-schema \
-      AttributeName=user_id,KeyType=HASH \
-      AttributeName=provider,KeyType=RANGE \
-  --billing-mode PAY_PER_REQUEST
-```
-
-(This table is also declared as `UserIntegrationsTable` in `template.yaml`, so a manual
-`sam deploy` will create it automatically — the command above is only needed if you want
-it to exist before the first deploy.)
-
+5. The `UserIntegrationsTable` DynamoDB table that stores per-user tokens is already
+   declared in `template.yaml` and created automatically by `sam deploy` — no manual
+   `aws dynamodb create-table` step is needed.
 6. Pass the client ID/secret as SAM parameters:
 
 ```bash
@@ -458,7 +477,7 @@ browser.
 ## 17. GitLab OAuth application setup (per-user "Connect GitLab")
 
 1. Go to **GitLab → User Settings → Applications**.
-2. Set **Redirect URI** to `https://yourapp.com/callback/gitlab`.
+2. Set **Redirect URI** to `https://<your-cloudfront-domain>/callback/gitlab`.
 3. Under **Scopes**, select `api`, `read_repository`, and `write_repository`.
 4. Leave "Confidential" **unchecked** — this must be a public/native client so the
    front-end can complete the full Authorization Code + PKCE exchange directly against
@@ -483,8 +502,10 @@ browser.
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | `deploy` job (SAM params) + `deploy-frontend` job | Per-user "Connect GitHub", Section 16 |
 | `GITLAB_OAUTH_CLIENT_ID` | `deploy-frontend` job only | Per-user "Connect GitLab", Section 17 (no secret needed) |
 | `COGNITO_DOMAIN` / `COGNITO_CLIENT_ID` | `deploy-frontend` job | Cognito Hosted UI, Section 2 |
-| `FRONTEND_BUCKET` | `deploy-frontend` job | S3 bucket for static hosting, Section 15 |
-| `CLOUDFRONT_DISTRIBUTION_ID` | `deploy-frontend` job | Optional; skips invalidation if unset |
+
+`FRONTEND_BUCKET` and `CLOUDFRONT_DISTRIBUTION_ID` are **no longer secrets** — both are
+now CloudFormation-managed (`FrontendBucket`, `FrontendDistribution` in `template.yaml`,
+Section 15) and resolved dynamically by CI from the stack outputs.
 
 Mark every secret above as masked/protected in both GitHub and GitLab.
 

@@ -72,8 +72,8 @@ jobs:
               GitLabToken=${{ secrets.GITLAB_TOKEN }} \
               GitHubOAuthClientId=${{ secrets.GITHUB_OAUTH_CLIENT_ID }} \
               GitHubOAuthClientSecret=${{ secrets.GITHUB_OAUTH_CLIENT_SECRET }}
-      - name: Get Function URL
-        id: get_url
+      - name: Get stack outputs
+        id: stack
         run: |
           FUNCTION_URL=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.STACK_NAME }} \
@@ -82,10 +82,10 @@ jobs:
           echo "$FUNCTION_URL"
           echo "function_url=$FUNCTION_URL" >> "$GITHUB_OUTPUT"
     outputs:
-      function_url: ${{ steps.get_url.outputs.function_url }}
+      function_url: ${{ steps.stack.outputs.function_url }}
 
   deploy-frontend:
-    needs: test
+    needs: deploy
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -97,24 +97,28 @@ jobs:
       - name: Resolve stack outputs
         id: stack
         run: |
-          FUNCTION_URL=$(aws cloudformation describe-stacks \
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.STACK_NAME }} \
-            --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
             --output text)
-          echo "function_url=$FUNCTION_URL" >> "$GITHUB_OUTPUT"
+          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue" \
+            --output text)
+          echo "bucket_name=$BUCKET_NAME" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$DISTRIBUTION_ID" >> "$GITHUB_OUTPUT"
       - name: Inject runtime config
         run: |
-          sed -i "s|__LAMBDA_FUNCTION_URL__|${{ steps.stack.outputs.function_url }}|g" front-end/config.js
+          sed -i "s|__LAMBDA_FUNCTION_URL__|${{ needs.deploy.outputs.function_url }}|g" front-end/config.js
           sed -i "s|__COGNITO_DOMAIN__|${{ secrets.COGNITO_DOMAIN }}|g" front-end/config.js
           sed -i "s|__COGNITO_CLIENT_ID__|${{ secrets.COGNITO_CLIENT_ID }}|g" front-end/config.js
           sed -i "s|__GITHUB_OAUTH_CLIENT_ID__|${{ secrets.GITHUB_OAUTH_CLIENT_ID }}|g" front-end/config.js
           sed -i "s|__GITLAB_OAUTH_CLIENT_ID__|${{ secrets.GITLAB_OAUTH_CLIENT_ID }}|g" front-end/config.js
       - name: Sync to S3
         run: |
-          aws s3 sync front-end/ s3://${{ secrets.FRONTEND_BUCKET }}/ --delete
+          aws s3 sync front-end/ s3://${{ steps.stack.outputs.bucket_name }}/ --delete
       - name: Invalidate CloudFront
-        if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID != '' }}
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --distribution-id ${{ steps.stack.outputs.distribution_id }} \
             --paths "/*"
