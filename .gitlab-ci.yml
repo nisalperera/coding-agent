@@ -1,4 +1,3 @@
-# [FINAL]
 stages:
   - test
   - deploy

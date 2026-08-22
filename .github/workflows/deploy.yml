@@ -1,4 +1,4 @@
-name: Deploy Coding Agent Stack [FINAL]
+name: Deploy Coding Agent Stack
 
 on:
   push:
