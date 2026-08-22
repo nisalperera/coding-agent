@@ -6,6 +6,7 @@
 <title>Nisal's Coding Agent</title>
 <meta name="description" content="Agentic coding assistant with repo-aware tools and RAG-backed answers." />
 
+
 <!-- Tailwind CSS (utility framework, no build step required) -->
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
@@ -25,10 +26,12 @@
   };
 </script>
 
+
 <!-- Markdown + syntax highlighting for assistant responses (code-focused agent) -->
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
 <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
+
 
 <style>
   html, body { height: 100%; }
@@ -49,7 +52,9 @@
 </style>
 </head>
 
+
 <body class="h-screen flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors">
+
 
   <!-- Header / Auth bar -->
   <header class="shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur sticky top-0 z-20">
@@ -61,6 +66,7 @@
           <p class="text-xs text-slate-500 dark:text-slate-400 truncate">Agentic AI &amp; RAG assistant</p>
         </div>
       </div>
+
 
       <div id="auth-bar" class="flex items-center gap-2">
         <div id="auth-signed-out" class="flex items-center gap-2">
@@ -103,6 +109,7 @@
     </div>
   </header>
 
+
   <!-- Chat log -->
   <main id="chat" class="flex-1 overflow-y-auto relative">
     <div class="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-4">
@@ -116,6 +123,7 @@
     </div>
   </main>
 
+
   <!-- Typing indicator -->
   <div id="typing-indicator" class="hidden max-w-3xl mx-auto w-full px-4 pb-1 -mt-2">
     <div class="flex items-center gap-1 text-slate-400 text-sm pl-11">
@@ -125,12 +133,15 @@
     </div>
   </div>
 
+
   <!-- Composer -->
   <footer class="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
     <div class="max-w-3xl mx-auto px-4 py-3">
 
+
       <!-- Attached file chips -->
       <div id="file-chips" class="hidden flex flex-wrap gap-2 mb-2"></div>
+
 
       <div class="flex items-end gap-2 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-brand-500">
         <input id="file-input" type="file" multiple class="hidden" onchange="handleFileSelect(this.files)" />
@@ -154,6 +165,7 @@
     </div>
   </footer>
 
+
   <!-- Integrations modal (GitHub / GitLab repo authorization) -->
   <div id="integrations-modal" class="hidden fixed inset-0 z-40 bg-slate-900/40 items-center justify-center p-4">
     <div class="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-5">
@@ -166,6 +178,7 @@
         Connect GitHub and/or GitLab so the agent can read and push changes to your own repositories, in
         addition to any shared service-level access already configured.
       </p>
+
 
       <div class="space-y-3">
         <!-- GitHub card -->
@@ -187,6 +200,7 @@
           </button>
         </div>
 
+
         <!-- GitLab card -->
         <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
           <div class="flex items-center gap-3 min-w-0">
@@ -207,14 +221,19 @@
         </div>
       </div>
 
+
       <p class="text-[11px] text-slate-400 mt-4">
-        Disconnecting only removes the token stored in this browser; revoke access from your
+        Disconnecting GitHub revokes the token stored on the server as well as clearing this browser.
+        Disconnecting GitLab only clears the token stored in this browser (GitLab tokens are never sent
+        to or stored on the server) — to fully revoke it, or to revoke either provider from the other
+        side, visit your
         <a class="underline" href="https://github.com/settings/applications" target="_blank" rel="noopener">GitHub</a> or
         <a class="underline" href="https://gitlab.com/-/profile/applications" target="_blank" rel="noopener">GitLab</a>
-        settings to fully revoke it.
+        application settings.
       </p>
     </div>
   </div>
+
 
   <!-- Runtime config must load before app.js since app.js reads window.APP_CONFIG -->
   <script src="config.js"></script>

@@ -20,12 +20,12 @@ issues via REST APIs).
 | **IAM deploy roles** | OIDC trust roles for GitHub Actions and GitLab CI so `sam deploy` runs with no static AWS access keys. | [SETUP_GUIDE.md → Step 3](./SETUP_GUIDE.md#step-3-iam--oidc-deploy-roles-for-github-actions-and-gitlab-ci) |
 | **Cognito (sign-in)** | User pool + Google identity provider + app client + Hosted UI domain. GitHub is deliberately **not** federated here — see the callout in Step 4. | [SETUP_GUIDE.md → Step 4](./SETUP_GUIDE.md#step-4-amazon-cognito--user-pool-google-sign-in-app-client) |
 | **Shared repo tokens** | One GitHub PAT and one GitLab PAT used as the fallback service-level identity for `github_push_file`/`gitlab_push_file` when a user hasn't connected their own account. | [SETUP_GUIDE.md → Step 5](./SETUP_GUIDE.md#step-5-shared-githubgitlab-repo-management-tokens) |
-| **DynamoDB tables** | `pending-actions` (human-in-the-loop approvals, TTL) and `user-integrations` (per-user OAuth tokens). Created automatically by `sam deploy`; manual commands included for reference only. | [SETUP_GUIDE.md → Step 6](./SETUP_GUIDE.md#step-6-dynamodb-tables-optional--sam-creates-these-automatically-in-step-8) |
+| **DynamoDB tables** | `pending-actions` (human-in-the-loop approvals, TTL) and `user-integrations` (per-user OAuth tokens — GitHub only; GitLab tokens never reach the backend). Created automatically by `sam deploy`; manual commands included for reference only. | [SETUP_GUIDE.md → Step 6](./SETUP_GUIDE.md#step-6-dynamodb-tables-optional--sam-creates-these-automatically-in-step-8) |
 | **Tavily API key** | Powers the agent's `web_search` tool. | [SETUP_GUIDE.md → Step 7](./SETUP_GUIDE.md#step-7-tavily-api-key) |
 | **First SAM deploy** | Creates the Lambda + Function URL, both DynamoDB tables, and the S3+CloudFront front-end hosting — using placeholder GitHub OAuth values, since the real callback URL doesn't exist yet. | [SETUP_GUIDE.md → Step 8](./SETUP_GUIDE.md#step-8-first-deploy-sam--with-placeholder-github-oauth-values) |
 | **Stack outputs** | `FunctionUrl`, `FrontendUrl`, `FrontendBucketName`, `FrontendDistributionId`. | [SETUP_GUIDE.md → Step 9](./SETUP_GUIDE.md#step-9-retrieve-stack-outputs) |
 | **Cognito callback update** | Point the app client's callback/logout URLs at the real front-end URL. | [SETUP_GUIDE.md → Step 10](./SETUP_GUIDE.md#step-10-update-the-cognito-app-client-with-the-real-front-end-url) |
-| **Connect GitHub / Connect GitLab** | Per-user repository OAuth, independent of Cognito. Once connected, GitHub actions run as that user, not the shared PAT — see the note below. GitHub needs a redeploy afterward with real credentials. | [SETUP_GUIDE.md → Step 11](./SETUP_GUIDE.md#step-11-register-the-per-user-connect-githubconnect-gitlab-oauth-integrations) |
+| **Connect GitHub / Connect GitLab** | Per-user repository OAuth, independent of Cognito. Once connected, actions run as that user, not the shared PAT/token — see the note below. GitHub needs a redeploy afterward with real credentials. | [SETUP_GUIDE.md → Step 11](./SETUP_GUIDE.md#step-11-register-the-per-user-connect-githubconnect-gitlab-oauth-integrations) |
 | **Custom domain (optional)** | Route 53 + free auto-validated ACM cert + CloudFront alias. HTTPS is enforced regardless of whether you use this. | [SETUP_GUIDE.md → Step 12](./SETUP_GUIDE.md#step-12-optional-custom-domain-via-an-existing-route-53-hosted-zone) |
 | **CI/CD secrets** | Full GitHub Secrets / GitLab CI variable list, with the `GITHUB_`-prefix rename explained. | [SETUP_GUIDE.md → Step 13](./SETUP_GUIDE.md#step-13-cicd-secrets--github-actions--gitlab-ci) |
 | **Push & verify** | Trigger the `test → deploy → deploy-frontend` pipeline and confirm it runs. | [SETUP_GUIDE.md → Step 14](./SETUP_GUIDE.md#step-14-push-to-main-and-verify-cicd) |
@@ -35,22 +35,34 @@ issues via REST APIs).
 
 ---
 
-## How per-user GitHub authorization actually gets used
+## How per-user repo authorization actually gets used
 
-Once a user clicks "Connect GitHub" (Step 11) and the OAuth exchange completes,
-`back-end/lambda_function.py`'s `call_repo_tool()` looks up that user's stored access
-token (`github_oauth.get_user_integration(user_id, "github")`) and passes it into
-`repo_tools.py`'s `github_create_branch`/`github_push_file`/`github_open_pull_request`/
-`github_create_issue` as a `github_token` kwarg — every commit, branch, PR, or issue
-those tools create is attributed to **that specific GitHub user**, not the shared
-service PAT. If a user hasn't connected their own account, the same functions fall
-back to the shared `GITHUB_TOKEN` automatically (`_github_headers()`'s default). This
-applies both to immediate tool execution and to actions resumed via the
-human-in-the-loop `approve_pending` flow.
+**GitHub** — Once a user clicks "Connect GitHub" (Step 11) and the OAuth exchange
+completes, `back-end/lambda_function.py`'s `call_repo_tool()` looks up that user's
+stored access token (`github_oauth.get_user_integration(user_id, "github")`) and
+passes it into `repo_tools.py`'s `github_create_branch`/`github_push_file`/
+`github_open_pull_request`/`github_create_issue` as a `github_token` kwarg — every
+commit, branch, PR, or issue those tools create is attributed to **that specific
+GitHub user**, not the shared service PAT. If a user hasn't connected their own
+account, the same functions fall back to the shared `GITHUB_TOKEN` automatically.
+Disconnecting GitHub (the 🔗 modal, or the header button) now also calls the
+`disconnect_integration` Lambda action, which deletes that DynamoDB row via
+`github_oauth.delete_user_integration()` — it isn't just a local browser flag anymore.
 
-GitLab does **not** yet have the equivalent — its per-user token lives only in
-`localStorage` client-side (PKCE, no backend storage), so `gitlab_*` tool calls always
-use the shared `GITLAB_TOKEN` today. See the known gaps below.
+**GitLab** — GitLab's per-user token is a "public"/native OAuth client PKCE token that
+lives only in the browser's `localStorage`; it is never sent to the backend to be
+stored. Instead, `front-end/app.js`'s `resolvePendingAction()` attaches it (as
+`gitlab_token`) only at the moment a `gitlab_*` tool call is being approved via the
+human-in-the-loop flow, and `call_repo_tool()` passes it through to `repo_tools.py`'s
+`gitlab_*` functions for that single call only, then discards it. If the user hasn't
+connected GitLab, those calls fall back to the shared `GITLAB_TOKEN`. Disconnecting
+GitLab clears only the browser's copy, since the server never had one.
+
+This applies to both provider flows via the `approve_pending` action — which is also
+where the front-end's confirmation UI (`appendConfirmation()`/`resolvePendingAction()`
+in `app.js`) now actually renders Approve/Deny controls for every risky tool call, a
+gap that previously left `write_file`/`run_shell`/`github_*`/`gitlab_*` confirmations
+silently unhandled in the browser.
 
 ---
 
@@ -79,15 +91,19 @@ by design.
 - [x] Cognito JWT verification on every Lambda request
 - [x] Per-user rate limiting (OWASP API Security)
 - [x] Object-level authorization via `owns_conversation()` (OWASP API Security — BOLA)
-- [x] Human-in-the-loop approval for all mutating tools (OWASP LLM Top 10 — Excessive Agency)
+- [x] Human-in-the-loop approval for all mutating tools (OWASP LLM Top 10 — Excessive Agency),
+      with a working front-end Approve/Deny UI (`appendConfirmation()`/`resolvePendingAction()`)
 - [x] Structured JSON logging with trace IDs
 - [x] All config/tokens via environment variables / Secrets Manager
 - [x] Lambda response streaming for real-time token output
 - [x] EC2 auto-start with bounded 2-minute startup budget and progress/retry UX
 - [x] Repo-management tools use REST API endpoints only, never shell git/gh/glab commands
 - [x] Per-user GitHub OAuth tokens stored server-side in DynamoDB, GitHub client secret
-      never leaves the Lambda, and are now actually used to attribute GitHub actions to
-      the connecting user instead of the shared PAT
+      never leaves the Lambda, and are actually used to attribute GitHub actions to the
+      connecting user instead of the shared PAT
+- [x] Per-user GitLab OAuth tokens are never stored server-side; sent per-request only
+      when approving a `gitlab_*` tool call, and used for that single call
+- [x] Disconnecting GitHub revokes the server-side DynamoDB token, not just a browser flag
 - [x] Front-end S3 bucket fully private, served only via CloudFront with OAC
 - [x] Custom-domain certificate DNS-validated automatically, no manual approval step
 - [x] HTTPS enforced end-to-end for the front-end, on both default and custom domains
@@ -98,25 +114,28 @@ by design.
 ## Known gaps to close before production
 
 - In-memory rate limiting must move to DynamoDB for multi-instance correctness.
-- GitHub/GitLab tokens currently use broad PAT scopes; narrow to fine-grained,
+- GitHub/GitLab tokens currently use broad PAT/OAuth scopes; narrow to fine-grained,
   repo-specific tokens before production use.
 - Add OpenTelemetry exporter configuration for full distributed tracing.
-- Per-user GitHub OAuth tokens have no refresh/expiry handling and no scoped
-  revocation endpoint beyond clearing local browser storage.
-- ~~The stored per-user GitHub OAuth token is not consumed by `repo_tools.py`~~ —
-  resolved: `lambda_function.py`'s `call_repo_tool()` now looks up the calling user's
-  connected GitHub token via `github_oauth.get_user_integration()` and passes it to
-  `github_create_branch`/`github_push_file`/`github_open_pull_request`/`github_create_issue`,
-  falling back to the shared `GITHUB_TOKEN` only if the user hasn't connected their
-  own account. GitLab per-user tokens are still not wired in (see next item).
-- The per-user **GitLab** OAuth token still only lives in the browser (PKCE, no
-  backend storage) and is not passed to `repo_tools.py`'s `gitlab_*` functions —
-  those still always use the shared `GITLAB_TOKEN`. Wiring this in would require the
-  front-end to send the token per-request and the Lambda to use it for that call only
-  (never persisting it), unlike GitHub's DynamoDB-backed flow.
-- "Disconnect GitHub" in the front-end only clears local browser state; there is no
-  Lambda action yet that calls `github_oauth.delete_user_integration()` to remove the
-  stored token server-side.
+- Per-user GitHub OAuth tokens have no refresh/expiry handling. GitLab's browser-side
+  token does have a `gitlab_refresh_token` stored, but nothing currently uses it to
+  silently refresh an expired GitLab access token — an expired token will just fail
+  the next `gitlab_*` tool approval with a 401 from GitLab's API.
+- ~~The stored per-user GitHub OAuth token is not consumed by `repo_tools.py`~~ and
+  ~~the per-user GitLab OAuth token is not wired in~~ — both **resolved**: see
+  "How per-user repo authorization actually gets used" above.
+- ~~"Disconnect GitHub" only clears local browser state~~ — **resolved**: it now calls
+  the `disconnect_integration` Lambda action, which deletes the DynamoDB row.
+- **New, found while fixing the above:** `front-end/app.js`'s `send()` function reads
+  the Lambda response with a single `resp.json()` call, but `lambda_function.py` writes
+  the response as a stream of separate JSON lines when `ensure_backend_ready()` emits
+  progress updates (EC2 cold start / vLLM loading) before the final answer or
+  `confirmation_required` object. In that case `resp.json()` will throw on the first
+  non-final line instead of showing progress or the eventual result. The confirmation
+  UI added in this pass works correctly only when the backend is already warm (no
+  progress lines emitted first). Properly consuming the stream (e.g. reading
+  `resp.body` as a `ReadableStream` and parsing newline-delimited JSON) is a separate,
+  larger front-end change and is not yet done.
 
 ---
 

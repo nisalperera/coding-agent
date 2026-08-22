@@ -8,16 +8,21 @@ Requires:
   GITHUB_TOKEN - a GitHub personal access token (repo scope) or GitHub App token,
                  used as the fallback when a calling user has not connected their
                  own GitHub account via the "Connect GitHub" OAuth flow.
-  GITLAB_TOKEN - a GitLab personal/project access token (api scope)
+  GITLAB_TOKEN - a GitLab personal/project access token (api scope), used as the
+                 fallback when a calling user has not connected their own GitLab
+                 account via the "Connect GitLab" OAuth flow.
 
-Each github_* function accepts an optional `github_token` keyword argument. When
-the calling Lambda has a per-user OAuth token available (see
-lambda_function.py's `call_repo_tool()` and github_oauth.get_user_integration()),
-it is passed through here so the action is performed as that specific GitHub
-user rather than the shared service identity. `github_token` is deliberately
+Each github_* function accepts an optional `github_token` kwarg, and each
+gitlab_* function accepts an optional `gitlab_token` kwarg. These are injected
+server-side by lambda_function.py's `call_repo_tool()` and are deliberately
 NOT part of REPO_TOOL_DEFINITIONS' JSON schema below, since the model calling
-these tools has no way to know or supply a real token — it is always injected
-server-side.
+these tools has no way to know or supply a real token.
+
+Unlike GitHub (whose per-user token is stored server-side in DynamoDB via
+github_oauth.py), GitLab's per-user token lives only in the browser
+(localStorage, PKCE public client) and is sent by the front-end on each
+`approve_pending` request. lambda_function.py passes it through for that one
+call only and never persists it.
 """
 import base64
 import json
@@ -45,8 +50,8 @@ def _github_headers(token=None):
 
 
 
-def _gitlab_headers():
-    return {"PRIVATE-TOKEN": GITLAB_TOKEN}
+def _gitlab_headers(token=None):
+    return {"PRIVATE-TOKEN": token or GITLAB_TOKEN}
 
 
 
@@ -126,10 +131,10 @@ def github_create_issue(owner, repo, title, body="", github_token=None):
 
 
 
-def gitlab_create_branch(project_id, new_branch, ref="main"):
+def gitlab_create_branch(project_id, new_branch, ref="main", gitlab_token=None):
     resp = requests.post(
         f"{GITLAB_API}/projects/{project_id}/repository/branches",
-        headers=_gitlab_headers(),
+        headers=_gitlab_headers(gitlab_token),
         params={"branch": new_branch, "ref": ref},
     )
     if resp.status_code >= 400:
@@ -138,13 +143,13 @@ def gitlab_create_branch(project_id, new_branch, ref="main"):
 
 
 
-def gitlab_push_file(project_id, file_path, content, commit_message, branch):
+def gitlab_push_file(project_id, file_path, content, commit_message, branch, gitlab_token=None):
     encoded_path = requests.utils.quote(file_path, safe="")
 
 
     check_resp = requests.get(
         f"{GITLAB_API}/projects/{project_id}/repository/files/{encoded_path}",
-        headers=_gitlab_headers(),
+        headers=_gitlab_headers(gitlab_token),
         params={"ref": branch},
     )
 
@@ -159,13 +164,13 @@ def gitlab_push_file(project_id, file_path, content, commit_message, branch):
     if check_resp.status_code == 200:
         resp = requests.put(
             f"{GITLAB_API}/projects/{project_id}/repository/files/{encoded_path}",
-            headers=_gitlab_headers(),
+            headers=_gitlab_headers(gitlab_token),
             json=payload,
         )
     else:
         resp = requests.post(
             f"{GITLAB_API}/projects/{project_id}/repository/files/{encoded_path}",
-            headers=_gitlab_headers(),
+            headers=_gitlab_headers(gitlab_token),
             json=payload,
         )
 
@@ -176,10 +181,10 @@ def gitlab_push_file(project_id, file_path, content, commit_message, branch):
 
 
 
-def gitlab_open_merge_request(project_id, title, source_branch, target_branch, description=""):
+def gitlab_open_merge_request(project_id, title, source_branch, target_branch, description="", gitlab_token=None):
     resp = requests.post(
         f"{GITLAB_API}/projects/{project_id}/merge_requests",
-        headers=_gitlab_headers(),
+        headers=_gitlab_headers(gitlab_token),
         json={
             "title": title,
             "source_branch": source_branch,
@@ -194,10 +199,10 @@ def gitlab_open_merge_request(project_id, title, source_branch, target_branch, d
 
 
 
-def gitlab_create_issue(project_id, title, description=""):
+def gitlab_create_issue(project_id, title, description="", gitlab_token=None):
     resp = requests.post(
         f"{GITLAB_API}/projects/{project_id}/issues",
-        headers=_gitlab_headers(),
+        headers=_gitlab_headers(gitlab_token),
         json={"title": title, "description": description},
     )
     if resp.status_code >= 400:
@@ -220,11 +225,19 @@ REPO_TOOL_FUNCS = {
 
 
 # Tool names whose functions accept a server-injected `github_token` kwarg.
-# See lambda_function.py's call_repo_tool() for how this is populated from
-# the calling user's "Connect GitHub" OAuth token (falls back to the shared
-# GITHUB_TOKEN when the user hasn't connected their own account).
+# Populated from the calling user's "Connect GitHub" OAuth token, stored
+# server-side in DynamoDB (see github_oauth.get_user_integration()).
 GITHUB_TOOL_NAMES = {
     "github_create_branch", "github_push_file", "github_open_pull_request", "github_create_issue",
+}
+
+
+# Tool names whose functions accept a server-injected `gitlab_token` kwarg.
+# Populated per-request from the front-end's locally-stored GitLab PKCE
+# token (never stored server-side) — see lambda_function.py's
+# `approve_pending` handling of `body["gitlab_token"]`.
+GITLAB_TOOL_NAMES = {
+    "gitlab_create_branch", "gitlab_push_file", "gitlab_open_merge_request", "gitlab_create_issue",
 }
 
 

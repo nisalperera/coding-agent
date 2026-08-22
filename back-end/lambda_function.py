@@ -9,6 +9,10 @@ AWS Lambda backend for the Perplexity-style web app.
 - Enforces per-user rate limiting (OWASP API Security).
 - Routes risky tool calls (write_file, run_shell, and GitHub/GitLab repo-management
   tools) through a human-in-the-loop pending-action flow backed by DynamoDB.
+- For GitHub tools, uses the connecting user's own stored OAuth token (DynamoDB)
+  when available. For GitLab tools, uses a per-request token sent by the front-end
+  with the approval decision (never persisted server-side).
+- Lets a user revoke their stored GitHub integration server-side ("disconnect_integration").
 - Calls a self-hosted vLLM server (Qwen3-Coder-14B) over the VPC.
 """
 import json
@@ -25,8 +29,11 @@ import urllib3
 import urllib.request
 
 
-from repo_tools import REPO_TOOL_FUNCS, REPO_TOOL_DEFINITIONS, REPO_RISKY_TOOLS, GITHUB_TOOL_NAMES
-from github_oauth import handle_github_oauth_callback, get_user_integration
+from repo_tools import (
+    REPO_TOOL_FUNCS, REPO_TOOL_DEFINITIONS, REPO_RISKY_TOOLS,
+    GITHUB_TOOL_NAMES, GITLAB_TOOL_NAMES,
+)
+from github_oauth import handle_github_oauth_callback, get_user_integration, delete_user_integration
 
 
 VLLM_ENDPOINT = os.environ["VLLM_ENDPOINT"]
@@ -217,18 +224,25 @@ def get_user_github_token(user_id):
 
 
 
-def call_repo_tool(name, args, user_id):
+def call_repo_tool(name, args, user_id, gitlab_token=None):
     """
-    Dispatches a repo-management tool call, injecting the calling user's own
-    GitHub OAuth token (if they've connected one) for github_* tools only.
-    GitLab tools still use the shared GITLAB_TOKEN — GitLab's per-user token
-    lives only in the browser today (Section 11/known gaps).
+    Dispatches a repo-management tool call.
+
+    - github_* tools: injects the calling user's own stored GitHub OAuth
+      token (if connected), falling back to the shared GITHUB_TOKEN.
+    - gitlab_* tools: injects `gitlab_token` if the caller supplied one with
+      this specific request (front-end sends its browser-local GitLab PKCE
+      token per-request; it is never stored server-side). Falls back to the
+      shared GITLAB_TOKEN when absent.
     """
     kwargs = dict(args)
     if name in GITHUB_TOOL_NAMES:
         token = get_user_github_token(user_id)
         if token:
             kwargs["github_token"] = token
+    elif name in GITLAB_TOOL_NAMES:
+        if gitlab_token:
+            kwargs["gitlab_token"] = gitlab_token
     return FUNCS[name](**kwargs)
 
 
@@ -282,7 +296,8 @@ async def handler(event, response_stream, context):
             response_stream.write(b'{"error": "forbidden"}')
             return
         if body["decision"] == "approve":
-            result = call_repo_tool(item["tool_name"], item["args"], user_id) \
+            gitlab_token = body.get("gitlab_token")
+            result = call_repo_tool(item["tool_name"], item["args"], user_id, gitlab_token=gitlab_token) \
                 if item["tool_name"] in FUNCS else "Unknown tool."
         else:
             result = "User denied this action."
@@ -296,6 +311,19 @@ async def handler(event, response_stream, context):
         status_code, result = handle_github_oauth_callback(body, user_id)
         log_event(logging.INFO, "github_oauth_callback", user_id=user_id, status_code=status_code, trace_id=trace_id)
         response_stream.write(json.dumps(result).encode())
+        return
+
+
+    if body.get("action") == "disconnect_integration":
+        provider = body.get("provider")
+        if provider == "github":
+            delete_user_integration(user_id, "github")
+            log_event(logging.INFO, "integration_disconnected", user_id=user_id, provider=provider, trace_id=trace_id)
+            response_stream.write(json.dumps({"disconnected": True, "provider": "github"}).encode())
+        else:
+            # GitLab has no server-side record to delete today — its token
+            # lives only in the browser (see repo_tools.py's docstring).
+            response_stream.write(json.dumps({"disconnected": True, "provider": provider, "server_side": False}).encode())
         return
 
 
@@ -347,7 +375,10 @@ async def handler(event, response_stream, context):
 
 
             messages.append(msg)
-            tool_result = call_repo_tool(name, args, user_id) if name in GITHUB_TOOL_NAMES else FUNCS[name](**args)
+            if name in GITHUB_TOOL_NAMES or name in GITLAB_TOOL_NAMES:
+                tool_result = call_repo_tool(name, args, user_id, gitlab_token=body.get("gitlab_token"))
+            else:
+                tool_result = FUNCS[name](**args)
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": str(tool_result)})
 
 
