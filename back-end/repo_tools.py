@@ -5,8 +5,19 @@ and issues. Repo creation/deletion is intentionally NOT included.
 
 
 Requires:
-  GITHUB_TOKEN - a GitHub personal access token (repo scope) or GitHub App token
+  GITHUB_TOKEN - a GitHub personal access token (repo scope) or GitHub App token,
+                 used as the fallback when a calling user has not connected their
+                 own GitHub account via the "Connect GitHub" OAuth flow.
   GITLAB_TOKEN - a GitLab personal/project access token (api scope)
+
+Each github_* function accepts an optional `github_token` keyword argument. When
+the calling Lambda has a per-user OAuth token available (see
+lambda_function.py's `call_repo_tool()` and github_oauth.get_user_integration()),
+it is passed through here so the action is performed as that specific GitHub
+user rather than the shared service identity. `github_token` is deliberately
+NOT part of REPO_TOOL_DEFINITIONS' JSON schema below, since the model calling
+these tools has no way to know or supply a real token — it is always injected
+server-side.
 """
 import base64
 import json
@@ -25,9 +36,9 @@ GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "")
 
 
 
-def _github_headers():
+def _github_headers(token=None):
     return {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Authorization": f"Bearer {token or GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
@@ -39,10 +50,10 @@ def _gitlab_headers():
 
 
 
-def github_create_branch(owner, repo, new_branch, from_branch="main"):
+def github_create_branch(owner, repo, new_branch, from_branch="main", github_token=None):
     ref_resp = requests.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/git/ref/heads/{from_branch}",
-        headers=_github_headers(),
+        headers=_github_headers(github_token),
     )
     ref_resp.raise_for_status()
     sha = ref_resp.json()["object"]["sha"]
@@ -50,7 +61,7 @@ def github_create_branch(owner, repo, new_branch, from_branch="main"):
 
     resp = requests.post(
         f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
-        headers=_github_headers(),
+        headers=_github_headers(github_token),
         json={"ref": f"refs/heads/{new_branch}", "sha": sha},
     )
     if resp.status_code >= 400:
@@ -59,10 +70,10 @@ def github_create_branch(owner, repo, new_branch, from_branch="main"):
 
 
 
-def github_push_file(owner, repo, path, content, message, branch):
+def github_push_file(owner, repo, path, content, message, branch, github_token=None):
     get_resp = requests.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/contents/{path}",
-        headers=_github_headers(),
+        headers=_github_headers(github_token),
         params={"ref": branch},
     )
     sha = get_resp.json().get("sha") if get_resp.status_code == 200 else None
@@ -79,7 +90,7 @@ def github_push_file(owner, repo, path, content, message, branch):
 
     resp = requests.put(
         f"{GITHUB_API}/repos/{owner}/{repo}/contents/{path}",
-        headers=_github_headers(),
+        headers=_github_headers(github_token),
         json=payload,
     )
     if resp.status_code >= 400:
@@ -89,10 +100,10 @@ def github_push_file(owner, repo, path, content, message, branch):
 
 
 
-def github_open_pull_request(owner, repo, title, head, base, body=""):
+def github_open_pull_request(owner, repo, title, head, base, body="", github_token=None):
     resp = requests.post(
         f"{GITHUB_API}/repos/{owner}/{repo}/pulls",
-        headers=_github_headers(),
+        headers=_github_headers(github_token),
         json={"title": title, "head": head, "base": base, "body": body},
     )
     if resp.status_code >= 400:
@@ -102,10 +113,10 @@ def github_open_pull_request(owner, repo, title, head, base, body=""):
 
 
 
-def github_create_issue(owner, repo, title, body=""):
+def github_create_issue(owner, repo, title, body="", github_token=None):
     resp = requests.post(
         f"{GITHUB_API}/repos/{owner}/{repo}/issues",
-        headers=_github_headers(),
+        headers=_github_headers(github_token),
         json={"title": title, "body": body},
     )
     if resp.status_code >= 400:
@@ -205,6 +216,15 @@ REPO_TOOL_FUNCS = {
     "gitlab_push_file": gitlab_push_file,
     "gitlab_open_merge_request": gitlab_open_merge_request,
     "gitlab_create_issue": gitlab_create_issue,
+}
+
+
+# Tool names whose functions accept a server-injected `github_token` kwarg.
+# See lambda_function.py's call_repo_tool() for how this is populated from
+# the calling user's "Connect GitHub" OAuth token (falls back to the shared
+# GITHUB_TOKEN when the user hasn't connected their own account).
+GITHUB_TOOL_NAMES = {
+    "github_create_branch", "github_push_file", "github_open_pull_request", "github_create_issue",
 }
 
 

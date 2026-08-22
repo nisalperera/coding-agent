@@ -25,8 +25,8 @@ import urllib3
 import urllib.request
 
 
-from repo_tools import REPO_TOOL_FUNCS, REPO_TOOL_DEFINITIONS, REPO_RISKY_TOOLS
-from github_oauth import handle_github_oauth_callback
+from repo_tools import REPO_TOOL_FUNCS, REPO_TOOL_DEFINITIONS, REPO_RISKY_TOOLS, GITHUB_TOOL_NAMES
+from github_oauth import handle_github_oauth_callback, get_user_integration
 
 
 VLLM_ENDPOINT = os.environ["VLLM_ENDPOINT"]
@@ -205,6 +205,34 @@ FUNCS.update(REPO_TOOL_FUNCS)
 
 
 
+def get_user_github_token(user_id):
+    """
+    Looks up the calling user's own GitHub access token, stored via the
+    "Connect GitHub" OAuth flow (github_oauth.py). Returns None if the user
+    has not connected their GitHub account, in which case repo_tools.py's
+    github_* functions fall back to the shared service-level GITHUB_TOKEN.
+    """
+    integration = get_user_integration(user_id, "github")
+    return integration.get("access_token") if integration else None
+
+
+
+def call_repo_tool(name, args, user_id):
+    """
+    Dispatches a repo-management tool call, injecting the calling user's own
+    GitHub OAuth token (if they've connected one) for github_* tools only.
+    GitLab tools still use the shared GITLAB_TOKEN — GitLab's per-user token
+    lives only in the browser today (Section 11/known gaps).
+    """
+    kwargs = dict(args)
+    if name in GITHUB_TOOL_NAMES:
+        token = get_user_github_token(user_id)
+        if token:
+            kwargs["github_token"] = token
+    return FUNCS[name](**kwargs)
+
+
+
 def call_vllm(messages, tools=None, stream=False):
     payload = {"model": MODEL, "messages": messages, "stream": stream}
     if tools:
@@ -254,7 +282,8 @@ async def handler(event, response_stream, context):
             response_stream.write(b'{"error": "forbidden"}')
             return
         if body["decision"] == "approve":
-            result = FUNCS[item["tool_name"]](**item["args"])
+            result = call_repo_tool(item["tool_name"], item["args"], user_id) \
+                if item["tool_name"] in FUNCS else "Unknown tool."
         else:
             result = "User denied this action."
         pending_table.delete_item(Key={"action_id": action_id})
@@ -318,7 +347,7 @@ async def handler(event, response_stream, context):
 
 
             messages.append(msg)
-            tool_result = FUNCS[name](**args)
+            tool_result = call_repo_tool(name, args, user_id) if name in GITHUB_TOOL_NAMES else FUNCS[name](**args)
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": str(tool_result)})
 
 
