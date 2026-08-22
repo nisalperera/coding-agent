@@ -1,4 +1,4 @@
-# AWS Configuration Guide
+# AWS Configuration Guide [FINAL]
 
 Complete setup steps for deploying the Qwen3-Coder-14B serving stack: vLLM on a T4 EC2
 instance, an authenticated Lambda-based web app, and a CLI coding agent, following
@@ -112,14 +112,27 @@ aws cognito-idp create-user-pool-domain \
 
 ## 3. Create the DynamoDB table for human-in-the-loop pending actions
 
+The AWS CLI's `create-table` has no `--time-to-live-specification` flag — TTL is always a
+separate `update-time-to-live` call, even though CloudFormation (Section 20's
+`template.yaml`) lets you set `TimeToLiveSpecification` directly on the table resource in
+one shot. Manually via the CLI it's two steps:
+
 ```bash
 aws dynamodb create-table \
   --table-name pending-actions \
   --attribute-definitions AttributeName=action_id,AttributeType=S \
   --key-schema AttributeName=action_id,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST \
-  --time-to-live-specification "Enabled=true, AttributeName=expires_at"
+  --billing-mode PAY_PER_REQUEST
+
+aws dynamodb wait table-exists --table-name pending-actions
+
+aws dynamodb update-time-to-live \
+  --table-name pending-actions \
+  --time-to-live-specification "Enabled=true,AttributeName=expires_at"
 ```
+
+The `wait table-exists` step matters because table creation is asynchronous —
+`update-time-to-live` can fail if it runs before the table reaches `ACTIVE` status.
 
 ---
 
@@ -204,6 +217,8 @@ aws dynamodb create-table \
 ```
 
 Replace the in-memory `check_rate_limit` function with reads/writes against this table.
+This table has no TTL attribute, so no `update-time-to-live` step is needed here — unlike
+`pending-actions` in Section 3.
 
 ---
 
