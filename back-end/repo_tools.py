@@ -3,6 +3,7 @@ GitHub and GitLab repository management tools, using REST API endpoints only
 (no shell/git CLI calls). Covers branches, file commits, pull/merge requests,
 and issues. Repo creation/deletion is intentionally NOT included.
 
+
 Requires:
   GITHUB_TOKEN - a GitHub personal access token (repo scope) or GitHub App token
   GITLAB_TOKEN - a GitLab personal/project access token (api scope)
@@ -11,13 +12,17 @@ import base64
 import json
 import os
 
+
 import requests
+
 
 GITHUB_API = "https://api.github.com"
 GITLAB_API = "https://gitlab.com/api/v4"
 
+
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "")
+
 
 
 def _github_headers():
@@ -28,8 +33,10 @@ def _github_headers():
     }
 
 
+
 def _gitlab_headers():
     return {"PRIVATE-TOKEN": GITLAB_TOKEN}
+
 
 
 def github_create_branch(owner, repo, new_branch, from_branch="main"):
@@ -39,6 +46,7 @@ def github_create_branch(owner, repo, new_branch, from_branch="main"):
     )
     ref_resp.raise_for_status()
     sha = ref_resp.json()["object"]["sha"]
+
 
     resp = requests.post(
         f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
@@ -50,6 +58,7 @@ def github_create_branch(owner, repo, new_branch, from_branch="main"):
     return f"Branch '{new_branch}' created from '{from_branch}' at {sha[:7]}."
 
 
+
 def github_push_file(owner, repo, path, content, message, branch):
     get_resp = requests.get(
         f"{GITHUB_API}/repos/{owner}/{repo}/contents/{path}",
@@ -58,6 +67,7 @@ def github_push_file(owner, repo, path, content, message, branch):
     )
     sha = get_resp.json().get("sha") if get_resp.status_code == 200 else None
 
+
     payload = {
         "message": message,
         "content": base64.b64encode(content.encode()).decode(),
@@ -65,6 +75,7 @@ def github_push_file(owner, repo, path, content, message, branch):
     }
     if sha:
         payload["sha"] = sha
+
 
     resp = requests.put(
         f"{GITHUB_API}/repos/{owner}/{repo}/contents/{path}",
@@ -75,6 +86,7 @@ def github_push_file(owner, repo, path, content, message, branch):
         return f"Error pushing file: {resp.status_code} {resp.text}"
     commit_sha = resp.json().get("commit", {}).get("sha", "unknown")
     return f"Committed '{path}' to branch '{branch}' (commit {commit_sha[:7]})."
+
 
 
 def github_open_pull_request(owner, repo, title, head, base, body=""):
@@ -89,6 +101,7 @@ def github_open_pull_request(owner, repo, title, head, base, body=""):
     return f"Pull request #{pr['number']} opened: {pr['html_url']}"
 
 
+
 def github_create_issue(owner, repo, title, body=""):
     resp = requests.post(
         f"{GITHUB_API}/repos/{owner}/{repo}/issues",
@@ -99,6 +112,7 @@ def github_create_issue(owner, repo, title, body=""):
         return f"Error creating issue: {resp.status_code} {resp.text}"
     issue = resp.json()
     return f"Issue #{issue['number']} created: {issue['html_url']}"
+
 
 
 def gitlab_create_branch(project_id, new_branch, ref="main"):
@@ -112,8 +126,10 @@ def gitlab_create_branch(project_id, new_branch, ref="main"):
     return f"Branch '{new_branch}' created from '{ref}'."
 
 
+
 def gitlab_push_file(project_id, file_path, content, commit_message, branch):
     encoded_path = requests.utils.quote(file_path, safe="")
+
 
     check_resp = requests.get(
         f"{GITLAB_API}/projects/{project_id}/repository/files/{encoded_path}",
@@ -121,11 +137,13 @@ def gitlab_push_file(project_id, file_path, content, commit_message, branch):
         params={"ref": branch},
     )
 
+
     payload = {
         "branch": branch,
         "content": content,
         "commit_message": commit_message,
     }
+
 
     if check_resp.status_code == 200:
         resp = requests.put(
@@ -140,9 +158,11 @@ def gitlab_push_file(project_id, file_path, content, commit_message, branch):
             json=payload,
         )
 
+
     if resp.status_code >= 400:
         return f"Error pushing file: {resp.status_code} {resp.text}"
     return f"Committed '{file_path}' to branch '{branch}' in project {project_id}."
+
 
 
 def gitlab_open_merge_request(project_id, title, source_branch, target_branch, description=""):
@@ -162,6 +182,7 @@ def gitlab_open_merge_request(project_id, title, source_branch, target_branch, d
     return f"Merge request !{mr['iid']} opened: {mr['web_url']}"
 
 
+
 def gitlab_create_issue(project_id, title, description=""):
     resp = requests.post(
         f"{GITLAB_API}/projects/{project_id}/issues",
@@ -174,6 +195,7 @@ def gitlab_create_issue(project_id, title, description=""):
     return f"Issue #{issue['iid']} created: {issue['web_url']}"
 
 
+
 REPO_TOOL_FUNCS = {
     "github_create_branch": github_create_branch,
     "github_push_file": github_push_file,
@@ -184,6 +206,7 @@ REPO_TOOL_FUNCS = {
     "gitlab_open_merge_request": gitlab_open_merge_request,
     "gitlab_create_issue": gitlab_create_issue,
 }
+
 
 REPO_TOOL_DEFINITIONS = [
     {"type": "function", "function": {
@@ -243,6 +266,7 @@ REPO_TOOL_DEFINITIONS = [
             "project_id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"},
         }, "required": ["project_id", "title"]}}},
 ]
+
 
 REPO_RISKY_TOOLS = {
     "github_create_branch", "github_push_file", "github_open_pull_request", "github_create_issue",

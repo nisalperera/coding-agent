@@ -11,15 +11,19 @@ import threading
 import urllib.parse
 import webbrowser
 
+
 import keyring
 import requests
+
 
 COGNITO_DOMAIN = "https://coding-agent-pool.auth.us-east-1.amazoncognito.com"
 CLIENT_ID = "YOUR_APP_CLIENT_ID"
 REDIRECT_URI = "http://localhost:8765/callback"
 SERVICE_NAME = "coding-agent-cli"
 
+
 _auth_code = {}
+
 
 
 class CallbackHandler(http.server.BaseHTTPRequestHandler):
@@ -32,8 +36,10 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"<h2>Login successful. You can close this tab.</h2>")
 
+
     def log_message(self, fmt, *args):
         pass
+
 
 
 def login():
@@ -42,8 +48,10 @@ def login():
         hashlib.sha256(verifier.encode()).digest()
     ).decode().rstrip("=")
 
+
     print("Choose provider: Google or GitHub")
     provider = input("> ").strip()
+
 
     params = urllib.parse.urlencode({
         "client_id": CLIENT_ID, "response_type": "code",
@@ -52,14 +60,17 @@ def login():
     })
     auth_url = f"{COGNITO_DOMAIN}/oauth2/authorize?{params}&identity_provider={provider}"
 
+
     server = http.server.HTTPServer(("localhost", 8765), CallbackHandler)
     threading.Thread(target=server.handle_request, daemon=True).start()
     webbrowser.open(auth_url)
     print("Opening browser for login...")
 
+
     while "code" not in _auth_code:
         pass
     server.shutdown()
+
 
     resp = requests.post(f"{COGNITO_DOMAIN}/oauth2/token", data={
         "grant_type": "authorization_code", "client_id": CLIENT_ID,
@@ -70,6 +81,7 @@ def login():
     keyring.set_password(SERVICE_NAME, "access_token", tokens["access_token"])
     keyring.set_password(SERVICE_NAME, "refresh_token", tokens.get("refresh_token", ""))
     print("Logged in successfully.")
+
 
 
 def refresh_access_token():
@@ -87,8 +99,10 @@ def refresh_access_token():
     return None
 
 
+
 def get_access_token():
     return keyring.get_password(SERVICE_NAME, "access_token")
+
 
 
 def logout():

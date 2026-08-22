@@ -13,12 +13,15 @@ from openai import OpenAI
 from cli_auth import login, logout, get_access_token
 from repo_tools import REPO_TOOL_FUNCS, REPO_TOOL_DEFINITIONS, REPO_RISKY_TOOLS
 
+
 VLLM_BASE_URL = "http://localhost:8000/v1"
 MODEL = "Qwen/Qwen3-Coder-14B-Instruct-AWQ"
 
 
+
 def read_file(path):
     return Path(path).read_text()
+
 
 
 def write_file(path, content):
@@ -26,15 +29,19 @@ def write_file(path, content):
     return f"Wrote {len(content)} chars to {path}"
 
 
+
 def run_shell(command):
     result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
     return result.stdout + result.stderr
 
 
+
 FUNCS = {"read_file": read_file, "write_file": write_file, "run_shell": run_shell}
 FUNCS.update(REPO_TOOL_FUNCS)
 
+
 RISKY_TOOLS = {"write_file", "run_shell"} | REPO_RISKY_TOOLS
+
 
 TOOLS = [
     {"type": "function", "function": {
@@ -50,8 +57,9 @@ TOOLS = [
 ] + REPO_TOOL_DEFINITIONS
 
 
+
 def confirm_action(tool_name, args):
-    print(f"\n\u26a0\ufe0f  Agent wants to run: {tool_name}({json.dumps(args, indent=2)})")
+    print(f"\n⚠️  Agent wants to run: {tool_name}({json.dumps(args, indent=2)})")
     choice = input("Approve? [y/N/e=edit]: ").strip().lower()
     if choice == "e":
         if tool_name == "run_shell":
@@ -62,6 +70,7 @@ def confirm_action(tool_name, args):
             return confirm2 == "y"
         return True
     return choice == "y"
+
 
 
 def agent_loop(client, user_prompt, max_turns=10):
@@ -79,30 +88,36 @@ def agent_loop(client, user_prompt, max_turns=10):
         msg = resp.choices[0].message
         messages.append(msg.model_dump())
 
+
         if not msg.tool_calls:
             print(msg.content)
             return
+
 
         for call in msg.tool_calls:
             args = json.loads(call.function.arguments)
             name = call.function.name
 
+
             if name in RISKY_TOOLS:
                 if not confirm_action(name, args):
                     result = "User denied this action."
-                    print("\u274c Denied.")
+                    print("❌ Denied.")
                     messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
                     continue
+
 
             result = FUNCS[name](**args)
             print(f"[tool] {name}({args}) -> {str(result)[:200]}")
             messages.append({"role": "tool", "tool_call_id": call.id, "content": str(result)})
 
 
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print('Usage: python cli_agent.py <login|logout|"your prompt">')
         sys.exit(1)
+
 
     if sys.argv[1] == "login":
         login()
@@ -111,10 +126,12 @@ if __name__ == "__main__":
         logout()
         sys.exit()
 
+
     token = get_access_token()
     if not token:
         print("Not logged in. Run: python cli_agent.py login")
         sys.exit(1)
+
 
     client = OpenAI(base_url=VLLM_BASE_URL, api_key="EMPTY",
                      default_headers={"Authorization": f"Bearer {token}"})
