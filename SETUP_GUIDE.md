@@ -95,13 +95,15 @@ serve the model:
 ```bash
 pip install vllm
 
-vllm serve Qwen/Qwen3-Coder-14B-Instruct-AWQ \
+vllm serve Qwen/Qwen2.5-Coder-7B-Instruct-AWQ \
   --quantization awq \
   --gpu-memory-utilization 0.85 \
   --max-model-len 8192 \
   --dtype float16 \
   --enable-auto-tool-choice \
-  --tool-call-parser qwen3_coder \
+  --tool-parser-plugin qwen2_5_coder_tool_parser.py \
+  --tool-call-parser qwen2_5_coder \
+  --chat-template tool_chat_template_qwen2_5_coder.jinja \
   --host 0.0.0.0 --port 8000
 ```
 
