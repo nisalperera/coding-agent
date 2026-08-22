@@ -261,6 +261,8 @@ async function handleGitHubCallback() {
 // via the "disconnect_integration" Lambda action — not just this browser's
 // local flag. Best-effort: local state is cleared even if the network call
 // fails, since the user's intent is "stop using my GitHub identity" either way.
+// This request never triggers backend progress streaming (no EC2/vLLM check
+// happens for this action), so a plain resp.json() is safe here.
 async function disconnectGitHub() {
   try {
     const resp = await fetch(LAMBDA_URL, {
@@ -499,12 +501,51 @@ function appendMessage(role, text, files = []) {
 }
 
 
+// ---- Cold-start progress bubble ------------------------------------------
+// Shown while ensure_backend_ready() in lambda_function.py is polling EC2/vLLM
+// and writing {"type":"progress", ...} lines before the final response. One
+// bubble is created on the first progress update and updated in place, then
+// removed once the stream reaches an answer/confirmation/error.
+function appendProgressMessage(message, percent) {
+  document.getElementById('empty-state')?.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-enter flex items-start gap-3 justify-start';
+
+
+  const avatar = document.createElement('div');
+  avatar.className = 'h-8 w-8 shrink-0 rounded-full bg-brand-100 dark:bg-brand-900 text-brand-700 dark:text-brand-200 flex items-center justify-center text-sm font-semibold';
+  avatar.textContent = '⏳';
+  wrap.appendChild(avatar);
+
+
+  const bubble = document.createElement('div');
+  bubble.className = 'rounded-2xl rounded-tl-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300';
+  bubble.dataset.progressText = 'true';
+  bubble.textContent = formatProgressText(message, percent);
+  wrap.appendChild(bubble);
+
+
+  chatEl().appendChild(wrap);
+  scrollToBottom();
+  return wrap;
+}
+function updateProgressMessage(wrapEl, message, percent) {
+  if (!wrapEl) return;
+  const bubble = wrapEl.querySelector('[data-progress-text]');
+  if (bubble) bubble.textContent = formatProgressText(message, percent);
+  scrollToBottom();
+}
+function removeProgressMessage(wrapEl) {
+  wrapEl?.remove();
+}
+function formatProgressText(message, percent) {
+  return `${message ?? 'Working...'}${typeof percent === 'number' ? ` (${percent}%)` : ''}`;
+}
+
+
 // Renders an inline Approve/Deny card for a risky tool call the backend is
 // asking the human to confirm (write_file, run_shell, or any github_*/gitlab_*
-// repo-management tool — see RISKY_TOOLS in lambda_function.py). This is the
-// human-in-the-loop UI referenced throughout the backend; previously `send()`
-// silently swallowed `confirmation_required` responses as "No response from
-// agent." with no way to ever approve or deny.
+// repo-management tool — see RISKY_TOOLS in lambda_function.py).
 function appendConfirmation(actionId, toolName, args) {
   document.getElementById('empty-state')?.remove();
   const wrap = document.createElement('div');
@@ -570,11 +611,10 @@ function appendConfirmation(actionId, toolName, args) {
 
 
 // Resolves a pending human-in-the-loop action. For gitlab_* tools, attaches
-// this browser's locally-stored GitLab token for this one call only — it is
-// never written back to localStorage from here and is not persisted by the
-// backend (see call_repo_tool() in lambda_function.py). GitHub tools don't
-// need this: the backend already looks up the connecting user's stored
-// GitHub token itself.
+// this browser's locally-stored GitLab token for this one call only. This
+// request never triggers backend progress streaming (approve_pending returns
+// a single flat JSON object immediately — see lambda_function.py), so a
+// plain resp.json() is safe here, unlike send() below.
 async function resolvePendingAction(actionId, decision, toolName) {
   setLoading(true);
   try {
@@ -609,6 +649,66 @@ function setLoading(loading) {
 }
 
 
+// Reads lambda_function.py's response as it actually streams from the
+// backend, instead of assuming it's a single JSON document. The backend
+// writes, in order and only as needed:
+//   1. Zero or more newline-terminated {"type":"progress", ...} lines
+//      (EC2 cold start / vLLM loading — see ensure_backend_ready()).
+//   2. Either a single non-streamed {"type":"error"|"confirmation_required", ...}
+//      object with NO trailing newline, and the response ends there; OR
+//   3. {"type":"answer_start"} followed by newline, then a series of
+//      "data: {\"token\": ...}\n\n" SSE-style chunks, ending in "data: [DONE]\n\n".
+// This function dispatches each event to the matching handler as it arrives.
+async function consumeAgentStream(response, handlers) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+
+  const handleLine = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+
+    if (trimmed.startsWith('data: ')) {
+      const payload = trimmed.slice(6).trim();
+      if (payload === '[DONE]') { handlers.onDone?.(); return; }
+      try {
+        const parsed = JSON.parse(payload);
+        if (parsed.token) handlers.onToken?.(parsed.token);
+      } catch { /* ignore an unparseable/partial SSE chunk */ }
+      return;
+    }
+
+
+    let obj;
+    try { obj = JSON.parse(trimmed); } catch { return; }
+
+
+    switch (obj.type) {
+      case 'progress': handlers.onProgress?.(obj); break;
+      case 'error': handlers.onError?.(obj); break;
+      case 'confirmation_required': handlers.onConfirmation?.(obj); break;
+      case 'answer_start': handlers.onAnswerStart?.(); break;
+      default: handlers.onFallback?.(obj);
+    }
+  };
+
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      handleLine(buffer.slice(0, idx));
+      buffer = buffer.slice(idx + 1);
+    }
+  }
+  if (buffer.trim()) handleLine(buffer);
+}
+
+
 async function send() {
   const message = inputEl.value.trim();
   if (!message && attachments.length === 0) return;
@@ -629,6 +729,12 @@ async function send() {
   setLoading(true);
 
 
+  let progressWrap = null;
+  let answerBubble = null;
+  let answerText = '';
+  let handledTerminalEvent = false;
+
+
   try {
     const resp = await fetch(LAMBDA_URL, {
       method: 'POST',
@@ -642,19 +748,56 @@ async function send() {
         attachments: filesForRequest,
       }),
     });
-    const result = await resp.json();
+    if (!resp.ok) throw new Error(`backend returned ${resp.status}`);
 
 
-    if (result.type === 'confirmation_required') {
-      appendConfirmation(result.action_id, result.tool_name, result.args);
-    } else if (result.type === 'error') {
-      appendMessage('assistant', `⚠️ ${result.message ?? 'The agent hit an error.'}`);
-    } else {
-      const reply = result.result ?? result.error ?? 'No response from agent.';
-      history.push({ role: 'assistant', content: reply });
-      appendMessage('assistant', reply);
+    await consumeAgentStream(resp, {
+      onProgress: (obj) => {
+        if (!progressWrap) progressWrap = appendProgressMessage(obj.message, obj.percent);
+        else updateProgressMessage(progressWrap, obj.message, obj.percent);
+      },
+      onError: (obj) => {
+        removeProgressMessage(progressWrap);
+        appendMessage('assistant', `⚠️ ${obj.message ?? 'The agent hit an error.'}`);
+        handledTerminalEvent = true;
+      },
+      onConfirmation: (obj) => {
+        removeProgressMessage(progressWrap);
+        appendConfirmation(obj.action_id, obj.tool_name, obj.args);
+        handledTerminalEvent = true;
+      },
+      onAnswerStart: () => {
+        removeProgressMessage(progressWrap);
+        answerBubble = appendMessage('assistant', '');
+      },
+      onToken: (token) => {
+        answerText += token;
+        if (answerBubble) {
+          answerBubble.innerHTML = renderContent(answerText);
+          highlightAll(answerBubble);
+          scrollToBottom();
+        }
+      },
+      onFallback: (obj) => {
+        // Defensive: a single flat {result|error} object with no "type" —
+        // not currently emitted by /send, but kept for backward compatibility.
+        removeProgressMessage(progressWrap);
+        const reply = obj.result ?? obj.error ?? 'No response from agent.';
+        appendMessage('assistant', reply);
+        history.push({ role: 'assistant', content: reply });
+        handledTerminalEvent = true;
+      },
+    });
+
+
+    if (answerBubble) {
+      history.push({ role: 'assistant', content: answerText });
+    } else if (!handledTerminalEvent) {
+      removeProgressMessage(progressWrap);
+      appendMessage('assistant', 'No response from agent.');
     }
   } catch (err) {
+    removeProgressMessage(progressWrap);
     appendMessage('assistant', `⚠️ Request failed: ${err.message}`);
   } finally {
     setLoading(false);

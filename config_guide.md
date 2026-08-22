@@ -45,9 +45,9 @@ passes it into `repo_tools.py`'s `github_create_branch`/`github_push_file`/
 commit, branch, PR, or issue those tools create is attributed to **that specific
 GitHub user**, not the shared service PAT. If a user hasn't connected their own
 account, the same functions fall back to the shared `GITHUB_TOKEN` automatically.
-Disconnecting GitHub (the 🔗 modal, or the header button) now also calls the
+Disconnecting GitHub (the 🔗 modal, or the header button) also calls the
 `disconnect_integration` Lambda action, which deletes that DynamoDB row via
-`github_oauth.delete_user_integration()` — it isn't just a local browser flag anymore.
+`github_oauth.delete_user_integration()` — it isn't just a local browser flag.
 
 **GitLab** — GitLab's per-user token is a "public"/native OAuth client PKCE token that
 lives only in the browser's `localStorage`; it is never sent to the backend to be
@@ -60,9 +60,26 @@ GitLab clears only the browser's copy, since the server never had one.
 
 This applies to both provider flows via the `approve_pending` action — which is also
 where the front-end's confirmation UI (`appendConfirmation()`/`resolvePendingAction()`
-in `app.js`) now actually renders Approve/Deny controls for every risky tool call, a
-gap that previously left `write_file`/`run_shell`/`github_*`/`gitlab_*` confirmations
-silently unhandled in the browser.
+in `app.js`) renders Approve/Deny controls for every risky tool call.
+
+---
+
+## How the front-end actually consumes the streamed response
+
+`back-end/lambda_function.py` writes its response as a sequence of events, not one
+JSON document: zero or more `{"type":"progress", ...}` lines while `ensure_backend_ready()`
+polls a cold EC2 instance / loading vLLM, then either a single `{"type":"error"}` or
+`{"type":"confirmation_required"}` object, **or** `{"type":"answer_start"}` followed by
+`"data: {\"token\": ...}\n\n"` SSE-style chunks ending in `"data: [DONE]\n\n"`.
+
+`front-end/app.js`'s `consumeAgentStream()` reads `response.body` as a `ReadableStream`,
+buffers and splits on newlines, and dispatches each event to a handler as it arrives:
+progress lines update a single in-place "⏳ ..." bubble (`appendProgressMessage()`/
+`updateProgressMessage()`), an `answer_start` swaps that bubble out for a live assistant
+message that grows token-by-token, and a `confirmation_required`/`error` event renders
+the same UI `send()` already produced. `resolvePendingAction()` (the `approve_pending`
+call) intentionally still uses a plain `resp.json()` — that action never triggers
+`ensure_backend_ready()`, so the backend always returns it as one flat object.
 
 ---
 
@@ -95,8 +112,10 @@ by design.
       with a working front-end Approve/Deny UI (`appendConfirmation()`/`resolvePendingAction()`)
 - [x] Structured JSON logging with trace IDs
 - [x] All config/tokens via environment variables / Secrets Manager
-- [x] Lambda response streaming for real-time token output
-- [x] EC2 auto-start with bounded 2-minute startup budget and progress/retry UX
+- [x] Lambda response streaming for real-time token output, correctly consumed end-to-end
+      by the front-end's `consumeAgentStream()` (progress → answer/confirmation/error)
+- [x] EC2 auto-start with bounded 2-minute startup budget and progress/retry UX, with a
+      visible in-chat progress indicator during cold starts
 - [x] Repo-management tools use REST API endpoints only, never shell git/gh/glab commands
 - [x] Per-user GitHub OAuth tokens stored server-side in DynamoDB, GitHub client secret
       never leaves the Lambda, and are actually used to attribute GitHub actions to the
@@ -126,16 +145,16 @@ by design.
   "How per-user repo authorization actually gets used" above.
 - ~~"Disconnect GitHub" only clears local browser state~~ — **resolved**: it now calls
   the `disconnect_integration` Lambda action, which deletes the DynamoDB row.
-- **New, found while fixing the above:** `front-end/app.js`'s `send()` function reads
-  the Lambda response with a single `resp.json()` call, but `lambda_function.py` writes
-  the response as a stream of separate JSON lines when `ensure_backend_ready()` emits
-  progress updates (EC2 cold start / vLLM loading) before the final answer or
-  `confirmation_required` object. In that case `resp.json()` will throw on the first
-  non-final line instead of showing progress or the eventual result. The confirmation
-  UI added in this pass works correctly only when the backend is already warm (no
-  progress lines emitted first). Properly consuming the stream (e.g. reading
-  `resp.body` as a `ReadableStream` and parsing newline-delimited JSON) is a separate,
-  larger front-end change and is not yet done.
+- ~~`app.js`'s `send()` reads the Lambda response with a single `resp.json()` call,
+  which breaks whenever `ensure_backend_ready()` emits progress lines before the final
+  answer/confirmation~~ — **resolved**: `send()` now uses `consumeAgentStream()` to read
+  `response.body` as a stream and dispatch each event (progress / answer_start+tokens /
+  confirmation_required / error) as it arrives. See "How the front-end actually consumes
+  the streamed response" above.
+- The live-updating assistant bubble re-parses the *entire* accumulated markdown string
+  through `marked.parse()` on every single token during streaming, rather than
+  incrementally. This is correct but not maximally efficient for very long answers;
+  acceptable for a chat UI at this scale, worth revisiting if answers get much longer.
 
 ---
 
