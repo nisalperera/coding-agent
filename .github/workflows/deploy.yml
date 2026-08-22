@@ -5,7 +5,8 @@ on:
     branches:
       - main
     paths:
-      - 'back-end/**'
+      - 'lambda_function.py'
+      - 'repo_tools.py'
       - 'template.yaml'
       - 'front-end/**'
       - '.github/workflows/deploy.yml'
@@ -31,7 +32,7 @@ jobs:
           pip install -r requirements.txt
           pip install pytest flake8
       - name: Lint
-        run: flake8 back-end/lambda_function.py back-end/repo_tools.py back-end/github_oauth.py cli/cli_agent.py cli/cli_auth.py --max-line-length=120 --extend-ignore=E203
+        run: flake8 lambda_function.py cli_agent.py cli_auth.py repo_tools.py --max-line-length=120 --extend-ignore=E203
       - name: Run unit tests
         run: |
           if [ -d tests ]; then pytest tests/ -v; else echo "No tests directory found, skipping"; fi

@@ -129,6 +129,7 @@ Resources:
         Cors:
           AllowOrigins: ["*"]
           AllowMethods: ["POST"]
+          AllowHeaders: ["authorization", "content-type"]
 
 
   # ---------------------------------------------------------------------

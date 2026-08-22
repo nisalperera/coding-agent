@@ -72,6 +72,8 @@ by design.
 - [x] Custom-domain certificate DNS-validated automatically, no manual approval step
 - [x] HTTPS enforced end-to-end for the front-end, on both default and custom domains
 - [x] GitHub is never federated through Cognito — see SETUP_GUIDE.md Step 4's callout
+- [x] Lambda Function URL CORS explicitly allows the `authorization`/`content-type`
+      headers the front-end actually sends (see `template.yaml`'s `FunctionUrlConfig`)
 
 ## Known gaps to close before production
 
@@ -81,8 +83,13 @@ by design.
 - Add OpenTelemetry exporter configuration for full distributed tracing.
 - Per-user GitHub OAuth tokens have no refresh/expiry handling and no scoped
   revocation endpoint beyond clearing local browser storage.
+- The stored per-user GitHub/GitLab OAuth tokens (Step 11) are not yet consumed by
+  `repo_tools.py` — connecting an account currently proves the OAuth flow works but
+  does not yet let the agent act as that specific user when pushing commits or PRs.
+- "Disconnect GitHub" in the front-end only clears local browser state; there is no
+  Lambda action yet that calls `github_oauth.delete_user_integration()` to remove the
+  stored token server-side.
 
 ---
 
-*This document, and the accompanying code package, are marked FINAL as of the version
-delivered in this session.*
+*Configuration reference for the coding agent project.*
