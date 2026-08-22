@@ -1,4 +1,4 @@
-# AWS Configuration Guide [FINAL]
+# AWS Configuration Guide
 
 This is a **brief index** of every configuration area in this project. For the actual
 commands, in the correct dependency order, see **[`SETUP_GUIDE.md`](./SETUP_GUIDE.md)**.
