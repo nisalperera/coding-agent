@@ -1,5 +1,5 @@
 """
-[FINAL] Claude Code-style CLI coding agent.
+Claude Code-style CLI coding agent.
 Connects to a self-hosted vLLM server (Qwen3-Coder-14B) via OpenAI-compatible API.
 Includes human-in-the-loop confirmation for risky tools (write_file, run_shell, and
 GitHub/GitLab repo-management tools) and OAuth login/logout via Cognito

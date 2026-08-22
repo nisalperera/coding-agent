@@ -1,5 +1,5 @@
 """
-[FINAL] CLI OAuth 2.0 Authorization Code + PKCE flow against Amazon Cognito.
+CLI OAuth 2.0 Authorization Code + PKCE flow against Amazon Cognito.
 Federated sign-in via Google and GitHub. Tokens stored in OS keyring
 (Keychain / Credential Manager / Secret Service), never in plaintext files.
 """

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: "[FINAL] Perplexity-style web app backend (Lambda + response streaming + EC2 auto-start + repo tools + front-end hosting)"
+Description: "Perplexity-style web app backend (Lambda + response streaming + EC2 auto-start + repo tools + front-end hosting)"
 
 
 Parameters:

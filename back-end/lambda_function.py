@@ -1,5 +1,5 @@
 """
-[FINAL] AWS Lambda backend for the Perplexity-style web app.
+AWS Lambda backend for the Perplexity-style web app.
 - Checks EC2 (T4 vLLM host) instance state and auto-starts it if stopped/stopping.
 - Streams live progress updates (percentage) while waiting for EC2 + vLLM to become ready.
 - Enforces a hard 2-minute (120s) overall startup budget; if exceeded, tells the user

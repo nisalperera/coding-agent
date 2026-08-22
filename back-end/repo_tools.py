@@ -1,5 +1,5 @@
 """
-[FINAL] GitHub and GitLab repository management tools, using REST API endpoints only
+GitHub and GitLab repository management tools, using REST API endpoints only
 (no shell/git CLI calls). Covers branches, file commits, pull/merge requests,
 and issues. Repo creation/deletion is intentionally NOT included.
 
