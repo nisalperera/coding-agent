@@ -2,12 +2,9 @@
 
 This is the **complete, dependency-ordered** walkthrough for standing up the coding
 agent from a blank AWS account to a live, working deployment. Follow the steps in
-order — several later steps genuinely cannot be done before earlier ones (e.g. you
+order, several later steps genuinely cannot be done before earlier ones (e.g. you
 cannot register a GitHub OAuth App's callback URL before the front-end has a real
 CloudFront URL, which doesn't exist until after the first deploy).
-
-`config_guide.md` is now a short index that links into the sections below. Use this
-document for the actual commands.
 
 **Prerequisites:** an AWS account with CLI credentials configured, a GitHub account,
 a GitLab account, a Google Cloud project, and (optionally) a domain already
@@ -131,7 +128,7 @@ Notes:
 
 This must exist before either CI pipeline can run `sam deploy`.
 
-### Step 3a: GitHub Actions
+### Step 3.1: GitHub Actions
 
 ```bash
 aws iam create-open-id-connect-provider \
@@ -177,7 +174,7 @@ aws iam get-role --role-name github-actions-deploy-role --query 'Role.Arn' --out
 # → save this as the AWS_DEPLOY_ROLE_ARN GitHub secret (Step 9)
 ```
 
-### Step 3b: GitLab CI
+### Step 3.2: GitLab CI
 
 ```bash
 aws iam create-open-id-connect-provider \
@@ -232,7 +229,7 @@ aws cognito-idp create-user-pool \
 # → USER_POOL_ID
 ```
 
-### Step 4a: Register Google as an identity provider
+### Step 4.1: Register Google as an identity provider
 
 Create the Google OAuth Client first (Google Cloud Console → APIs & Services →
 Credentials → Create Credentials → OAuth client ID, application type "Web
@@ -255,7 +252,7 @@ aws cognito-idp create-identity-provider \
   --attribute-mapping '{"email": "email", "name": "name"}'
 ```
 
-### Step 4b: Create the app client
+### Step 4.2: Create the app client
 
 ```bash
 aws cognito-idp create-user-pool-client \
@@ -276,7 +273,7 @@ The callback/logout URLs use `localhost` placeholders here because the real
 front-end URL doesn't exist yet (it's a CloudFront output from Step 8). You'll update
 these with `update-user-pool-client` in Step 10.
 
-### Step 4c: Set up the Hosted UI domain
+### Step 4.3: Set up the Hosted UI domain
 
 ```bash
 aws cognito-idp create-user-pool-domain \
@@ -421,13 +418,13 @@ aws cognito-idp update-user-pool-client \
 These are separate from Cognito sign-in (Step 4) and let an already-signed-in user
 additionally authorize the agent against their own GitHub/GitLab account.
 
-### Step 11a: GitHub OAuth App
+### Step 11.1: GitHub OAuth App
 
 1. **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
 2. **Authorization callback URL**: `<FrontendUrl-from-step-9>/callback/github`.
 3. Copy the **Client ID** and **Client Secret**.
 
-### Step 11b: GitLab OAuth application
+### Step 11.2: GitLab OAuth application
 
 1. **GitLab → User Settings → Applications**.
 2. **Redirect URI**: `<FrontendUrl-from-step-9>/callback/gitlab`.
@@ -435,7 +432,7 @@ additionally authorize the agent against their own GitHub/GitLab account.
    **unchecked** (public/native client — GitLab supports full PKCE with no secret).
 4. Copy the **Application ID** (no secret to store).
 
-### Step 11c: Redeploy with the real GitHub OAuth credentials
+### Step 11.3: Redeploy with the real GitHub OAuth credentials
 
 ```bash
 sam deploy \
