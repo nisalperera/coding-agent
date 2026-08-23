@@ -108,20 +108,28 @@ curl -fsSL https://ollama.com/install.sh | sh
 
 This installs Ollama and registers it as a systemd service (`ollama.service`) that
 starts automatically — but binds to `127.0.0.1:11434` by default, which Lambda can't
-reach across the VPC. Expose it on all interfaces:
+reach across the VPC. Expose it on all interfaces, and store pulled models on the
+instance's local NVMe SSD (`g4dn.xlarge` ships with one, mounted by the Deep Learning
+AMI at `/opt/dlami/nvme`) instead of the root EBS volume — meaningfully faster model
+load times on cold start, since NVMe instance storage vastly outperforms gp3 EBS:
 
 ```bash
+sudo mkdir -p /opt/dlami/nvme/ollama-models
+sudo chown -R ollama:ollama /opt/dlami/nvme/ollama-models
+
 sudo mkdir -p /etc/systemd/system/ollama.service.d
 sudo tee /etc/systemd/system/ollama.service.d/override.conf <<'EOF'
 [Service]
 Environment="OLLAMA_HOST=0.0.0.0:11434"
+Environment="OLLAMA_MODELS=/opt/dlami/nvme/ollama-models"
 EOF
 sudo systemctl daemon-reload
 sudo systemctl restart ollama
 ```
 
 Pull and warm the model (downloads and quantizes-on-fetch automatically — no manual
-`--quantization`/`--dtype` flags to pick):
+`--quantization`/`--dtype` flags to pick; this now lands under `/opt/dlami/nvme/ollama-models`
+rather than the default `~/.ollama/models`):
 
 ```bash
 ollama pull qwen2.5-coder:14b
@@ -133,6 +141,18 @@ second SSH session for GPU utilization):
 ```bash
 ollama run qwen2.5-coder:14b "print('hello world')"
 ```
+
+> **NVMe instance-store caveat:** unlike the root EBS volume, `/opt/dlami/nvme` is
+> ephemeral instance storage — its contents are wiped whenever the instance is
+> **stopped** (not just terminated; a reboot is fine, a stop/start cycle is not). If
+> anything ever calls `ec2:StopInstances` on this host (this repo's Lambda only ever
+> **starts** a stopped instance in `ensure_backend_ready()`, it never stops one — but
+> a cost-saving cron job or manual stop would still wipe it), the ~9GB model has to be
+> re-pulled from scratch on the next start, adding several minutes to the next cold
+> start on top of the usual EC2-boot + Ollama-startup wait. If you stop this instance
+> regularly for cost reasons, store the model on the root EBS volume instead (drop the
+> `OLLAMA_MODELS` override) and accept the slower load, or snapshot/restore the NVMe
+> volume's contents as part of your stop/start automation.
 
 Note the instance's **private** IP — that becomes (parameter/env var name kept as-is
 for compatibility with the existing SAM parameter and CI/CD secret — it now points at
