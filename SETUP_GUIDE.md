@@ -76,15 +76,10 @@ for lower cost, which is fine for a single-user setup.
 
 ## Step 2: Launch the EC2 GPU instance and serve Qwen2.5-Coder-14B with Ollama
 
-> **Why not vLLM / why not `Qwen3-Coder-14B-Instruct-AWQ`:** that exact model name
-> doesn't exist — Qwen's Coder line only ships as MoE checkpoints (30B-A3B,
-> 480B-A35B), never as a dense 14B, so vLLM had nothing valid to load. It also
-> wouldn't have fit a T4 either way (MoE checkpoints load every expert's weights into
-> VRAM regardless of how few are "active"). We're serving the real,
-> officially-published **`qwen2.5-coder:14b`** model via **Ollama** instead — Ollama
-> runs on llama.cpp under the hood, manages GGUF quantization for you, and (unlike
-> vLLM's Marlin AWQ kernels, which need Ampere or newer) has no dependency on kernel
-> features the T4's Turing architecture (compute capability 7.5) lacks.
+> **Why not vLLM:** Ollama runs on llama.cpp under the hood, manages GGUF 
+> quantization for you, and (unlike vLLM's Marlin AWQ kernels, which
+> need Ampere or newer) has no dependency on kernel features
+> the T4's Turing architecture (compute capability 7.5) lacks.
 
 ```bash
 aws ec2 run-instances \
