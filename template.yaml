@@ -38,19 +38,6 @@ Parameters:
     Type: String
     NoEcho: true
     Description: GitHub OAuth App client secret (server-side code-for-token exchange only)
-  OllamaDashboardHost:
-    Type: String
-    Default: ""
-    Description: >-
-      Tailscale IP or MagicDNS hostname of the model-server EC2 host (e.g. "100.x.y.z"
-      or "ec2-ollama.tailnet-name.ts.net"), used only to build the GET
-      /ollama/dashboard redirect to Open WebUI (see SETUP_GUIDE.md Step 2.1). Leave
-      blank to disable that route (it 404s instead of redirecting). Deliberately NOT
-      the VPC private IP (unreachable from outside the VPC) or a public IP.
-  OllamaDashboardPort:
-    Type: String
-    Default: "3000"
-    Description: Port Open WebUI listens on at OllamaDashboardHost.
   DomainName:
     Type: String
     Default: ""
@@ -128,8 +115,6 @@ Resources:
           GITHUB_OAUTH_CLIENT_ID: !Ref GitHubOAuthClientId
           GITHUB_OAUTH_CLIENT_SECRET: !Ref GitHubOAuthClientSecret
           USER_INTEGRATIONS_TABLE: !Ref UserIntegrationsTable
-          OLLAMA_DASHBOARD_HOST: !Ref OllamaDashboardHost
-          OLLAMA_DASHBOARD_PORT: !Ref OllamaDashboardPort
       VpcConfig:
         SubnetIds:
           - !Ref SubnetId

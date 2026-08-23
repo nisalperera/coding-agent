@@ -13,9 +13,6 @@ AWS Lambda backend for the Perplexity-style web app.
   when available. For GitLab tools, uses a per-request token sent by the front-end
   with the approval decision (never persisted server-side).
 - Lets a user revoke their stored GitHub integration server-side ("disconnect_integration").
-- Redirects GET /ollama/dashboard to the Open WebUI management dashboard running on
-  the model-server EC2 host (port 3000), reachable via Tailscale — see OLLAMA_DASHBOARD_HOST.
-  This route intentionally bypasses Cognito auth (see the handler for why).
 - Calls a self-hosted vLLM server (Qwen3-Coder-14B) over the VPC.
 """
 import json
@@ -46,16 +43,6 @@ USER_POOL_ID = os.environ["USER_POOL_ID"]
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
 EC2_INSTANCE_ID = os.environ["EC2_INSTANCE_ID"]
-
-# Tailscale IP or MagicDNS hostname (e.g. "100.x.y.z" or "ec2-ollama.tailnet-name.ts.net")
-# of the model-server EC2 host, used only to build the /ollama/dashboard redirect
-# target below. Left blank, that route 404s instead of redirecting. This is
-# deliberately NOT the VPC private IP — that's unreachable from outside the VPC, and
-# NOT a public IP either — Tailscale gives us a routable address without opening the
-# instance to the internet, since Tailscale traffic never touches the VPC security
-# group's filtered ENI path.
-OLLAMA_DASHBOARD_HOST = os.environ.get("OLLAMA_DASHBOARD_HOST", "")
-OLLAMA_DASHBOARD_PORT = os.environ.get("OLLAMA_DASHBOARD_PORT", "3000")
 
 
 STARTUP_BUDGET_S = int(os.environ.get("STARTUP_BUDGET_S", "120"))
@@ -278,35 +265,6 @@ def call_vllm(messages, tools=None, stream=False):
 @awslambda.streamifyResponse
 async def handler(event, response_stream, context):
     trace_id = str(uuid.uuid4())
-
-
-    # ---- GET /ollama/dashboard: redirect to Open WebUI on the model-server host ----
-    # This route is checked before any Cognito auth, deliberately. A plain browser
-    # address-bar navigation can't attach an Authorization header, so there's no way
-    # to gate this on Cognito without the front-end mediating it. Instead, access is
-    # controlled at the network layer: OLLAMA_DASHBOARD_HOST is a Tailscale
-    # IP/MagicDNS hostname, only reachable to devices already on the same tailnet —
-    # plus Open WebUI's own login on top of that. See SETUP_GUIDE.md Step 2.1.
-    http_method = event.get("requestContext", {}).get("http", {}).get("method", "")
-    raw_path = event.get("rawPath", "")
-    if http_method == "GET" and raw_path == "/ollama/dashboard":
-        if not OLLAMA_DASHBOARD_HOST:
-            response_stream = awslambda.HttpResponseStream.from(response_stream, {
-                "statusCode": 404,
-                "headers": {"Content-Type": "text/plain"},
-            })
-            response_stream.write(b"Ollama dashboard is not configured (OLLAMA_DASHBOARD_HOST is unset).")
-            return
-        redirect_url = f"http://{OLLAMA_DASHBOARD_HOST}:{OLLAMA_DASHBOARD_PORT}"
-        log_event(logging.INFO, "ollama_dashboard_redirect", redirect_url=redirect_url, trace_id=trace_id)
-        response_stream = awslambda.HttpResponseStream.from(response_stream, {
-            "statusCode": 302,
-            "headers": {"Location": redirect_url},
-        })
-        response_stream.write(b"")
-        return
-
-
     headers = event.get("headers", {})
     auth_header = headers.get("authorization", "")
     token = auth_header.replace("Bearer ", "")

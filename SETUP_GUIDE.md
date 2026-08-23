@@ -205,12 +205,6 @@ run test chats against `qwen2.5-coder:14b` directly, without going through the a
 or `curl`. It's optional and entirely separate from the Lambda→Ollama chat path — the
 agent keeps talking to Ollama's `/v1/chat/completions` exactly as before.
 
-Two access paths are documented: **Tailscale** (Step 2.1.2's bind + `/ollama/dashboard`
-redirect below — the recommended path if you already run Tailscale on this host and
-your client) or **SSM Session Manager port-forwarding** (Step 2.1.3/2.1.4 — works with
-no extra software beyond the AWS CLI, but requires a manual tunnel each time and no
-browser-address-bar shortcut).
-
 ### Step 2.1.1: Install Docker on the EC2 host
 
 ```bash
@@ -219,7 +213,7 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-### Step 2.1.2: Run Open WebUI
+### Step 2.1.2: Run Open WebUI, bound to localhost only
 
 ```bash
 docker run -d \
@@ -227,48 +221,22 @@ docker run -d \
   --restart always \
   --add-host=host.docker.internal:host-gateway \
   -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-  -p 3000:8080 \
+  -p 127.0.0.1:3000:8080 \
   -v open-webui:/app/backend/data \
   ghcr.io/open-webui/open-webui:main
 ```
 
-Note `-p 3000:8080` binds to **all interfaces**, not just `localhost`. This is safe
-specifically because Tailscale traffic arrives over its own virtual interface
-(`tailscale0`), not through the VPC's regular ENI — the security group from Step 1
-still blocks anyone reaching port 3000 over the normal VPC/internet path, since there's
-no ingress rule for it there. Only devices on the same tailnet, or anything already
-inside the VPC, can reach port 3000 at all.
+Note the `-p 127.0.0.1:3000:8080` — this binds Open WebUI to `localhost` **on the EC2
+instance itself only**. It is not reachable from the VPC, Lambda, or the internet;
+the security group from Step 1 needs no new ingress rule for this. You reach it
+exclusively through the tunnel in Step 2.1.4.
 
-> **If you're not using Tailscale**, bind to `127.0.0.1:3000:8080` instead (localhost
-> only) and use the SSM tunnel in Step 2.1.3/2.1.4 to reach it — don't leave port 3000
-> open on all interfaces without either Tailscale or an SSM tunnel gatekeeping access.
+### Step 2.1.3: Give the instance permission to accept SSM sessions
 
-### Step 2.1.2a: Tailscale — reach the dashboard directly from your browser
-
-If this EC2 host and your client machine are already joined to the same Tailscale
-account (tailnet), no tunnel or port-forward is needed — Tailscale gives the instance
-a stable, mesh-routable address that your browser can reach directly, without opening
-anything to the public internet or even touching the VPC's security group:
-
-```bash
-tailscale status
-# → note the instance's Tailscale IP (100.x.y.z) or MagicDNS hostname
-```
-
-Set that value as the `OllamaDashboardHost` SAM parameter (Steps 8/11.3) and redeploy;
-`back-end/lambda_function.py` then serves a `GET /ollama/dashboard` route on the
-Lambda Function URL that redirects straight to `http://<tailscale-address>:3000`. This
-route intentionally skips Cognito auth — a plain browser navigation can't carry an
-`Authorization` header — relying instead on Tailscale's own network-level access
-control (only tailnet members can reach the target at all) plus Open WebUI's own login
-as a second layer. Leaving `OllamaDashboardHost` blank disables the route (it 404s).
-
-### Step 2.1.3: (No Tailscale) Give the instance permission to accept SSM sessions
-
-Skip this and 2.1.4 if you used Tailscale above. Otherwise: the private subnet from
-Step 1 has no direct inbound path (that's the point), so reaching `localhost:3000` on
-the instance requires AWS Systems Manager Session Manager instead of a normal SSH
-port-forward. Attach an SSM-capable role to the already-running instance:
+The private subnet from Step 1 has no direct inbound path (that's the point), so
+reaching `localhost:3000` on the instance requires AWS Systems Manager Session
+Manager instead of a normal SSH port-forward. Attach an SSM-capable role to the
+already-running instance:
 
 ```bash
 aws iam create-role --role-name coding-agent-ec2-ssm-role \
@@ -294,7 +262,7 @@ IAM permissions. Most current Deep Learning AMIs ship the SSM Agent preinstalled
 after attaching the profile, install it manually (`sudo snap install amazon-ssm-agent
 --classic` on Ubuntu) and retry.
 
-### Step 2.1.4: (No Tailscale) Port-forward to it and open the dashboard
+### Step 2.1.4: Port-forward to it and open the dashboard
 
 ```bash
 aws ssm start-session \
@@ -562,13 +530,8 @@ sam deploy \
     GitHubToken=YOUR_GITHUB_PAT \
     GitLabToken=YOUR_GITLAB_PAT \
     GitHubOAuthClientId=placeholder \
-    GitHubOAuthClientSecret=placeholder \
-    OllamaDashboardHost=YOUR_TAILSCALE_IP_OR_HOSTNAME
+    GitHubOAuthClientSecret=placeholder
 ```
-
-`OllamaDashboardHost` is optional — omit it (or leave the default empty string) if
-you're not using the Step 2.1 Open WebUI dashboard yet; the `/ollama/dashboard` route
-just 404s until it's set.
 
 The `VllmEndpoint` parameter name is unchanged from the vLLM setup for compatibility
 with the CI/CD secret names in Step 13 — it now points at Ollama's port (`11434`)
@@ -648,8 +611,7 @@ sam deploy \
     GitHubToken=YOUR_GITHUB_PAT \
     GitLabToken=YOUR_GITLAB_PAT \
     GitHubOAuthClientId=YOUR_REAL_GITHUB_OAUTH_CLIENT_ID \
-    GitHubOAuthClientSecret=YOUR_REAL_GITHUB_OAUTH_CLIENT_SECRET \
-    OllamaDashboardHost=YOUR_TAILSCALE_IP_OR_HOSTNAME
+    GitHubOAuthClientSecret=YOUR_REAL_GITHUB_OAUTH_CLIENT_SECRET
 ```
 
 The GitLab Application ID doesn't go into this SAM deploy at all — it only needs to
@@ -708,7 +670,6 @@ auto-generated token), so a few names differ between the two platforms:
 | `GITLAB_OAUTH_CLIENT_ID` | `GITLAB_OAUTH_CLIENT_ID` | Step 11.2 |
 | `COGNITO_DOMAIN` | `COGNITO_DOMAIN` | Step 4.3 |
 | `COGNITO_CLIENT_ID` | `COGNITO_CLIENT_ID` | Step 4.2 |
-| `OLLAMA_DASHBOARD_HOST` (optional) | `OLLAMA_DASHBOARD_HOST` (optional) | Step 2.1.2a |
 | `FRONTEND_DOMAIN_NAME` (optional) | `FRONTEND_DOMAIN_NAME` (optional) | Step 12 |
 | `FRONTEND_HOSTED_ZONE_ID` (optional) | `FRONTEND_HOSTED_ZONE_ID` (optional) | Step 12 |
 
@@ -738,8 +699,6 @@ depends on `deploy` succeeding first, since it reads that job's stack outputs.
 4. Send a chat message — confirms Lambda → EC2 auto-start (if stopped) → Ollama →
    streamed response end-to-end.
 5. Attach a small file and send it — confirms the file upload path.
-6. If you set `OllamaDashboardHost`, visit `<FunctionUrl>/ollama/dashboard` — confirms
-   it redirects to Open WebUI over Tailscale.
 
 ---
 
