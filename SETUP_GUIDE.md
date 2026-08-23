@@ -14,8 +14,8 @@ registered in Route 53.
 
 ## Step 1: Networking — VPC, subnet, security groups
 
-The Lambda function and the EC2 GPU host must share a VPC so Lambda can reach vLLM
-over a private IP. If you don't already have a suitable VPC, create one:
+The Lambda function and the EC2 GPU host must share a VPC so Lambda can reach the
+model server over a private IP. If you don't already have a suitable VPC, create one:
 
 ```bash
 aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query 'Vpc.VpcId' --output text
@@ -26,14 +26,14 @@ aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 \
 # → save as SUBNET_ID (this becomes the SubnetId SAM parameter)
 
 aws ec2 create-security-group --group-name coding-agent-sg \
-  --description "Coding agent: Lambda <-> EC2 vLLM" --vpc-id $VPC_ID \
+  --description "Coding agent: Lambda <-> EC2 model server" --vpc-id $VPC_ID \
   --query 'GroupId' --output text
 # → save as SECURITY_GROUP_ID (this becomes the SecurityGroupId SAM parameter)
 
-# Allow the security group to reach itself on vLLM's port (Lambda -> EC2)
+# Allow the security group to reach itself on Ollama's default port (Lambda -> EC2)
 aws ec2 authorize-security-group-ingress \
   --group-id $SECURITY_GROUP_ID \
-  --protocol tcp --port 8000 \
+  --protocol tcp --port 11434 \
   --source-group $SECURITY_GROUP_ID
 ```
 
@@ -74,7 +74,17 @@ for lower cost, which is fine for a single-user setup.
 
 ---
 
-## Step 2: Launch the EC2 GPU instance and serve Qwen3-Coder-14B
+## Step 2: Launch the EC2 GPU instance and serve Qwen2.5-Coder-14B with Ollama
+
+> **Why not vLLM / why not `Qwen3-Coder-14B-Instruct-AWQ`:** that exact model name
+> doesn't exist — Qwen's Coder line only ships as MoE checkpoints (30B-A3B,
+> 480B-A35B), never as a dense 14B, so vLLM had nothing valid to load. It also
+> wouldn't have fit a T4 either way (MoE checkpoints load every expert's weights into
+> VRAM regardless of how few are "active"). We're serving the real,
+> officially-published **`qwen2.5-coder:14b`** model via **Ollama** instead — Ollama
+> runs on llama.cpp under the hood, manages GGUF quantization for you, and (unlike
+> vLLM's Marlin AWQ kernels, which need Ampere or newer) has no dependency on kernel
+> features the T4's Turing architecture (compute capability 7.5) lacks.
 
 ```bash
 aws ec2 run-instances \
@@ -89,40 +99,78 @@ aws ec2 run-instances \
 ```
 
 Use a Deep Learning AMI (Ubuntu, with NVIDIA drivers + CUDA preinstalled) rather than
-a bare Ubuntu AMI, to avoid manually installing GPU drivers. Once running, SSH in and
-serve the model:
+a bare Ubuntu AMI, to avoid manually installing GPU drivers — this is unchanged from
+the vLLM setup, Ollama uses the same NVIDIA driver/CUDA stack. Once running, SSH in:
 
 ```bash
-pip install vllm
-
-vllm serve Qwen/Qwen2.5-Coder-7B-Instruct-AWQ \
-  --quantization awq \
-  --gpu-memory-utilization 0.85 \
-  --max-model-len 8192 \
-  --dtype float16 \
-  --enable-auto-tool-choice \
-  --tool-parser-plugin qwen2_5_coder_tool_parser.py \
-  --tool-call-parser qwen2_5_coder \
-  --chat-template tool_chat_template_qwen2_5_coder.jinja \
-  --host 0.0.0.0 --port 8000
+curl -fsSL https://ollama.com/install.sh | sh
 ```
 
-Note the instance's **private** IP — that becomes:
+This installs Ollama and registers it as a systemd service (`ollama.service`) that
+starts automatically — but binds to `127.0.0.1:11434` by default, which Lambda can't
+reach across the VPC. Expose it on all interfaces:
+
+```bash
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+sudo tee /etc/systemd/system/ollama.service.d/override.conf <<'EOF'
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+Pull and warm the model (downloads and quantizes-on-fetch automatically — no manual
+`--quantization`/`--dtype` flags to pick):
+
+```bash
+ollama pull qwen2.5-coder:14b
+```
+
+Sanity-check that it's actually using the GPU (run this, then check `nvidia-smi` in a
+second SSH session for GPU utilization):
+
+```bash
+ollama run qwen2.5-coder:14b "print('hello world')"
+```
+
+Note the instance's **private** IP — that becomes (parameter/env var name kept as-is
+for compatibility with the existing SAM parameter and CI/CD secret — it now points at
+Ollama's OpenAI-compatible API, not vLLM):
 
 ```
-VLLM_ENDPOINT=http://<private-ip>:8000/v1
+VLLM_ENDPOINT=http://<private-ip>:11434/v1
 ```
 
 Notes:
-- T4 (Turing, compute capability 7.5) supports AWQ, GPTQ, Marlin, INT8 W8A8, GGUF, and
-  bitsandbytes quantization kernels. FP8 is NOT supported on T4.
-- `--tool-call-parser qwen3_coder` is mandatory for structured tool calls.
-- The security group from Step 1 already permits inbound port 8000 from itself
-  (Lambda's ENI shares this security group), so no `0.0.0.0/0` rule is needed.
+- The `qwen2.5-coder:14b` tag defaults to a 4-bit (Q4_K_M) GGUF quantization at
+  roughly **9GB**, comfortably inside the T4's 16GB with room for KV cache at a
+  reasonable context length. If you want more headroom (e.g. for longer contexts or
+  concurrent requests), `ollama pull qwen2.5-coder:7b` (~5GB) is the safer fallback.
+- No separate `--tool-call-parser`/`--chat-template` flags are needed — Ollama bakes
+  each model's chat template in, and Qwen2.5-Coder supports tool/function calling
+  through Ollama's `/v1/chat/completions` `tools` parameter the same way it did
+  through vLLM's.
+- The security group ingress rule in Step 1 now opens port **11434** (Ollama's
+  default), not vLLM's 8000 — Lambda's ENI still reaches it via the same
+  self-referencing security group, no other change needed there.
+- Handy compatibility bonus: Ollama's root endpoint (`GET http://<ip>:11434/`) returns
+  HTTP 200 with the plain-text body `"Ollama is running"`. `lambda_function.py`'s
+  `is_vllm_ready()` only checks `resp.status == 200` and never parses the body, so the
+  existing health-check logic keeps working with **no backend code changes** — just
+  point `VLLM_HEALTH_ENDPOINT` at `http://<private-ip>:11434/` instead of a `/health`
+  path.
 - The Lambda's own runtime EC2 permissions (`ec2:DescribeInstances`,
   `ec2:StartInstances`) are granted via `template.yaml`'s `ChatFunction` resource, not
   here — you don't need to attach anything extra to this instance's own IAM role for
   the agent's auto-start/stop feature to work.
+- **If you'd rather run raw llama.cpp** instead of Ollama (e.g. for finer control over
+  quantization or build flags), the same private-IP-and-port pattern applies: build
+  `llama.cpp`, download a `qwen2.5-coder-14b-instruct` GGUF from Hugging Face, and run
+  `./llama-server -m <path-to-gguf> --host 0.0.0.0 --port 11434`. `llama-server`
+  exposes both an OpenAI-compatible `/v1/chat/completions` endpoint and a real
+  `/health` endpoint directly analogous to vLLM's, so `VLLM_HEALTH_ENDPOINT` would stay
+  on a `/health` suffix in that case rather than Ollama's plain `/`.
 
 ---
 
@@ -365,7 +413,7 @@ sam deploy \
   --capabilities CAPABILITY_IAM \
   --resolve-s3 \
   --parameter-overrides \
-    VllmEndpoint=http://<ec2-private-ip>:8000/v1 \
+    VllmEndpoint=http://<ec2-private-ip>:11434/v1 \
     UserPoolId=$USER_POOL_ID \
     TavilyApiKey=YOUR_TAVILY_API_KEY \
     SubnetId=$SUBNET_ID \
@@ -376,6 +424,10 @@ sam deploy \
     GitHubOAuthClientId=placeholder \
     GitHubOAuthClientSecret=placeholder
 ```
+
+The `VllmEndpoint` parameter name is unchanged from the vLLM setup for compatibility
+with the CI/CD secret names in Step 13 — it now points at Ollama's port (`11434`)
+instead of vLLM's (`8000`); see Step 2's callout.
 
 This creates: the `ChatFunction` Lambda + Function URL, both DynamoDB tables, and the
 front-end's `FrontendBucket` + `FrontendOriginAccessControl` + `FrontendDistribution`
@@ -442,7 +494,7 @@ sam deploy \
   --capabilities CAPABILITY_IAM \
   --resolve-s3 \
   --parameter-overrides \
-    VllmEndpoint=http://<ec2-private-ip>:8000/v1 \
+    VllmEndpoint=http://<ec2-private-ip>:11434/v1 \
     UserPoolId=$USER_POOL_ID \
     TavilyApiKey=YOUR_TAVILY_API_KEY \
     SubnetId=$SUBNET_ID \
@@ -497,7 +549,7 @@ auto-generated token), so a few names differ between the two platforms:
 | GitHub secret | GitLab CI variable | Value (from which step) |
 |---|---|---|
 | `AWS_DEPLOY_ROLE_ARN` | `AWS_DEPLOY_ROLE_ARN` | Step 3 role ARN |
-| `VLLM_ENDPOINT` | `VLLM_ENDPOINT` | Step 2 |
+| `VLLM_ENDPOINT` | `VLLM_ENDPOINT` | Step 2 — now Ollama's `:11434/v1`, name kept for compatibility |
 | `COGNITO_USER_POOL_ID` | `COGNITO_USER_POOL_ID` | Step 4 |
 | `TAVILY_API_KEY` | `TAVILY_API_KEY` | Step 7 |
 | `VPC_SUBNET_ID` | `VPC_SUBNET_ID` | Step 1 |
@@ -536,8 +588,8 @@ depends on `deploy` succeeding first, since it reads that job's stack outputs.
 2. **Sign in with Google** — confirms Cognito + PKCE flow.
 3. **Connect GitHub** and **Connect GitLab** from the header — confirms both OAuth
    integrations independently of Cognito.
-4. Send a chat message — confirms Lambda → EC2 auto-start (if stopped) → vLLM → streamed
-   response end-to-end.
+4. Send a chat message — confirms Lambda → EC2 auto-start (if stopped) → Ollama →
+   streamed response end-to-end.
 5. Attach a small file and send it — confirms the file upload path.
 
 ---

@@ -6,7 +6,11 @@ Description: "Perplexity-style web app backend (Lambda + response streaming + EC
 Parameters:
   VllmEndpoint:
     Type: String
-    Description: Private HTTP endpoint of the vLLM server on the T4 EC2 instance
+    Description: >-
+      Private HTTP endpoint of the model server on the T4 EC2 instance. Despite the
+      parameter name (kept for compatibility with existing CI/CD secrets), this now
+      points at Ollama's OpenAI-compatible API (http://<private-ip>:11434/v1), not
+      vLLM — see SETUP_GUIDE.md Step 2.
   UserPoolId:
     Type: String
   TavilyApiKey:
@@ -18,7 +22,7 @@ Parameters:
     Type: String
   Ec2InstanceId:
     Type: String
-    Description: Instance ID of the T4 EC2 host running vLLM
+    Description: Instance ID of the T4 EC2 host running the model server (Ollama)
   GitHubToken:
     Type: String
     NoEcho: true
@@ -97,7 +101,11 @@ Resources:
       Environment:
         Variables:
           VLLM_ENDPOINT: !Ref VllmEndpoint
-          MODEL_NAME: Qwen/Qwen3-Coder-14B-Instruct-AWQ
+          # Ollama model tag (see SETUP_GUIDE.md Step 2) — must exactly match
+          # what was pulled on the EC2 host via `ollama pull qwen2.5-coder:14b`.
+          # The previous value, "Qwen/Qwen3-Coder-14B-Instruct-AWQ", was never a
+          # real, loadable model.
+          MODEL_NAME: "qwen2.5-coder:14b"
           USER_POOL_ID: !Ref UserPoolId
           TAVILY_API_KEY: !Ref TavilyApiKey
           EC2_INSTANCE_ID: !Ref Ec2InstanceId
@@ -161,6 +169,7 @@ Resources:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
+
   FrontendOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -169,6 +178,7 @@ Resources:
         OriginAccessControlOriginType: s3
         SigningBehavior: always
         SigningProtocol: sigv4
+
 
   FrontendCertificate:
     Type: AWS::CertificateManager::Certificate
@@ -179,6 +189,7 @@ Resources:
       DomainValidationOptions:
         - DomainName: !Ref DomainName
           HostedZoneId: !Ref HostedZoneId
+
 
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
@@ -217,6 +228,7 @@ Resources:
             ResponseCode: 200
             ResponsePagePath: /index.html
 
+
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -232,6 +244,7 @@ Resources:
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
 
   FrontendDnsRecord:
     Type: AWS::Route53::RecordSet
