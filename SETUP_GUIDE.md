@@ -38,10 +38,10 @@ aws ec2 authorize-security-group-ingress \
 ```
 
 You'll also need outbound internet access from this subnet for Cognito JWKS lookups,
-Tavily, GitHub, and GitLab API calls — either a NAT Gateway (Step 1a) or, for a
+Tavily, GitHub, and GitLab API calls — either a NAT Gateway (Step 1.1) or, for a
 cheaper personal setup, a small NAT instance.
 
-### Step 1a: NAT Gateway (or NAT instance) for outbound internet access
+### Step 1.1: NAT Gateway (or NAT instance) for outbound internet access
 
 ```bash
 aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text
@@ -189,6 +189,91 @@ Notes:
   exposes both an OpenAI-compatible `/v1/chat/completions` endpoint and a real
   `/health` endpoint directly analogous to vLLM's, so `VLLM_HEALTH_ENDPOINT` would stay
   on a `/health` suffix in that case rather than Ollama's plain `/`.
+
+---
+
+## Step 2.1: (Optional) Open WebUI — a management dashboard for Ollama
+
+[Open WebUI](https://github.com/open-webui/open-webui) gives you a browser-based
+dashboard on top of the Ollama instance from Step 2: browse/pull/delete models, and
+run test chats against `qwen2.5-coder:14b` directly, without going through the agent
+or `curl`. It's optional and entirely separate from the Lambda→Ollama chat path — the
+agent keeps talking to Ollama's `/v1/chat/completions` exactly as before.
+
+### Step 2.1.1: Install Docker on the EC2 host
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### Step 2.1.2: Run Open WebUI, bound to localhost only
+
+```bash
+docker run -d \
+  --name open-webui \
+  --restart always \
+  --add-host=host.docker.internal:host-gateway \
+  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  -p 127.0.0.1:3000:8080 \
+  -v open-webui:/app/backend/data \
+  ghcr.io/open-webui/open-webui:main
+```
+
+Note the `-p 127.0.0.1:3000:8080` — this binds Open WebUI to `localhost` **on the EC2
+instance itself only**. It is not reachable from the VPC, Lambda, or the internet;
+the security group from Step 1 needs no new ingress rule for this. You reach it
+exclusively through the tunnel in Step 2.1.4.
+
+### Step 2.1.3: Give the instance permission to accept SSM sessions
+
+The private subnet from Step 1 has no direct inbound path (that's the point), so
+reaching `localhost:3000` on the instance requires AWS Systems Manager Session
+Manager instead of a normal SSH port-forward. Attach an SSM-capable role to the
+already-running instance:
+
+```bash
+aws iam create-role --role-name coding-agent-ec2-ssm-role \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+
+aws iam attach-role-policy --role-name coding-agent-ec2-ssm-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+aws iam create-instance-profile --instance-profile-name coding-agent-ec2-ssm-profile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name coding-agent-ec2-ssm-profile \
+  --role-name coding-agent-ec2-ssm-role
+
+aws ec2 associate-iam-instance-profile \
+  --instance-id $EC2_INSTANCE_ID \
+  --iam-instance-profile Name=coding-agent-ec2-ssm-profile
+```
+
+This doesn't require relaunching the instance or touching `template.yaml` — it's a
+separate IAM role attached directly to the EC2 host, unrelated to the Lambda's own
+IAM permissions. Most current Deep Learning AMIs ship the SSM Agent preinstalled; if
+`aws ssm describe-instance-information` doesn't list your instance a minute or two
+after attaching the profile, install it manually (`sudo snap install amazon-ssm-agent
+--classic` on Ubuntu) and retry.
+
+### Step 2.1.4: Port-forward to it and open the dashboard
+
+```bash
+aws ssm start-session \
+  --target $EC2_INSTANCE_ID \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["3000"],"localPortNumber":["3000"]}'
+```
+
+Leave that running, then open `http://localhost:3000` in your browser. First run asks
+you to create a local admin account (stored in the `open-webui` Docker volume on the
+instance, unrelated to Cognito/GitHub/GitLab auth) — that's Open WebUI's own account
+system, not the coding agent's.
+
+> **If you already have SSH access configured to this host** (e.g. via a bastion or
+> VPN into the VPC), a plain `ssh -L 3000:localhost:3000 ...` tunnel works identically
+> and you can skip Step 2.1.3 entirely.
 
 ---
 
@@ -355,7 +440,7 @@ aws cognito-idp create-user-pool-domain \
 > OAuth implementation doesn't expose this endpoint, so `create-identity-provider`
 > for GitHub always fails with `InvalidParameterException: Unable to contact
 > well-known endpoint` — no combination of parameters fixes this. GitHub repository
-> access is handled entirely by the separate "Connect GitHub" flow in Step 11a instead.
+> access is handled entirely by the separate "Connect GitHub" flow in Step 11.1 instead.
 
 ---
 
@@ -419,9 +504,9 @@ dashboard. This powers the agent's `web_search` tool.
 ## Step 8: First deploy (SAM) — with placeholder GitHub OAuth values
 
 At this point you have everything a first deploy needs *except* the GitHub OAuth App
-credentials (Step 11a), because that App's callback URL requires the CloudFront URL
+credentials (Step 11.1), because that App's callback URL requires the CloudFront URL
 this very deploy is about to create. Use placeholder values for those two parameters
-now; you'll redeploy with real ones in Step 11c.
+now; you'll redeploy with real ones in Step 11.3.
 
 ```bash
 sam build --use-container
@@ -540,7 +625,7 @@ aws route53 list-hosted-zones-by-name --dns-name yourdomain.com \
 ```
 
 Add `DomainName=agent.yourdomain.com` and `HostedZoneId=$HOSTED_ZONE_ID` to the
-`sam deploy --parameter-overrides` list from Step 11c and redeploy. This creates:
+`sam deploy --parameter-overrides` list from Step 11.3 and redeploy. This creates:
 
 - `FrontendCertificate` — an ACM cert, DNS-validated automatically against your
   hosted zone (CloudFormation writes the validation record itself — no manual steps).
@@ -575,11 +660,11 @@ auto-generated token), so a few names differ between the two platforms:
 | `EC2_INSTANCE_ID` | `EC2_INSTANCE_ID` | Step 2 |
 | `GH_TOKEN` | `GITHUB_TOKEN` | Step 5 |
 | `GITLAB_TOKEN` | `GITLAB_TOKEN` | Step 5 |
-| `GH_OAUTH_CLIENT_ID` | `GITHUB_OAUTH_CLIENT_ID` | Step 11a |
-| `GH_OAUTH_CLIENT_SECRET` | `GITHUB_OAUTH_CLIENT_SECRET` | Step 11a |
-| `GITLAB_OAUTH_CLIENT_ID` | `GITLAB_OAUTH_CLIENT_ID` | Step 11b |
-| `COGNITO_DOMAIN` | `COGNITO_DOMAIN` | Step 4c |
-| `COGNITO_CLIENT_ID` | `COGNITO_CLIENT_ID` | Step 4b |
+| `GH_OAUTH_CLIENT_ID` | `GITHUB_OAUTH_CLIENT_ID` | Step 11.1 |
+| `GH_OAUTH_CLIENT_SECRET` | `GITHUB_OAUTH_CLIENT_SECRET` | Step 11.1 |
+| `GITLAB_OAUTH_CLIENT_ID` | `GITLAB_OAUTH_CLIENT_ID` | Step 11.2 |
+| `COGNITO_DOMAIN` | `COGNITO_DOMAIN` | Step 4.3 |
+| `COGNITO_CLIENT_ID` | `COGNITO_CLIENT_ID` | Step 4.2 |
 | `FRONTEND_DOMAIN_NAME` (optional) | `FRONTEND_DOMAIN_NAME` (optional) | Step 12 |
 | `FRONTEND_HOSTED_ZONE_ID` (optional) | `FRONTEND_HOSTED_ZONE_ID` (optional) | Step 12 |
 
