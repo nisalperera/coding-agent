@@ -93,14 +93,21 @@ aws ec2 run-instances \
   --key-name your-keypair \
   --subnet-id $SUBNET_ID \
   --security-group-ids $SECURITY_GROUP_ID \
-  --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":100,"VolumeType":"gp3"}}]' \
+  --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,"VolumeType":"gp3"}}]' \
   --query 'Instances[0].InstanceId' --output text
 # → EC2_INSTANCE_ID (this becomes the Ec2InstanceId SAM parameter)
 ```
 
-Use a Deep Learning AMI (Ubuntu, with NVIDIA drivers + CUDA preinstalled) rather than
-a bare Ubuntu AMI, to avoid manually installing GPU drivers — this is unchanged from
-the vLLM setup, Ollama uses the same NVIDIA driver/CUDA stack. Once running, SSH in:
+Use the **Deep Learning Base OSS Nvidia Driver AMI** (Ubuntu) rather than a full
+"Deep Learning AMI (Ubuntu) with Conda" — the Conda variant pre-loads several
+multi-GB ML framework environments (PyTorch, TensorFlow, etc.) that Ollama has no use
+for, and often already uses 30-45GB of root volume before you've installed anything.
+The Base OSS variant ships just the NVIDIA driver + CUDA (Ollama bundles everything
+else it needs) and typically uses only 15-25GB, comfortably leaving room on a **50GB**
+root volume for the OS, Ollama's own binary, and logs. The model itself does **not**
+count against this root volume at all — see the NVMe note below.
+
+Once running, SSH in:
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
@@ -108,28 +115,25 @@ curl -fsSL https://ollama.com/install.sh | sh
 
 This installs Ollama and registers it as a systemd service (`ollama.service`) that
 starts automatically — but binds to `127.0.0.1:11434` by default, which Lambda can't
-reach across the VPC. Expose it on all interfaces, and store pulled models on the
-instance's local NVMe SSD (`g4dn.xlarge` ships with one, mounted by the Deep Learning
-AMI at `/opt/dlami/nvme`) instead of the root EBS volume — meaningfully faster model
-load times on cold start, since NVMe instance storage vastly outperforms gp3 EBS:
+reach across the VPC. Expose it on all interfaces:
 
 ```bash
-sudo mkdir -p /opt/dlami/nvme/ollama-models
-sudo chown -R ollama:ollama /opt/dlami/nvme/ollama-models
-
 sudo mkdir -p /etc/systemd/system/ollama.service.d
 sudo tee /etc/systemd/system/ollama.service.d/override.conf <<'EOF'
 [Service]
 Environment="OLLAMA_HOST=0.0.0.0:11434"
-Environment="OLLAMA_MODELS=/opt/dlami/nvme/ollama-models"
 EOF
 sudo systemctl daemon-reload
 sudo systemctl restart ollama
 ```
 
 Pull and warm the model (downloads and quantizes-on-fetch automatically — no manual
-`--quantization`/`--dtype` flags to pick; this now lands under `/opt/dlami/nvme/ollama-models`
-rather than the default `~/.ollama/models`):
+`--quantization`/`--dtype` flags to pick). This uses Ollama's **default** model
+directory (no `OLLAMA_MODELS` override) — for the systemd service that's
+`/usr/share/ollama/.ollama/models`, which on a Deep Learning AMI happens to live on
+the **NVMe instance store**, not the 50GB root EBS volume, since `g4dn.xlarge` mounts
+its 125GB local NVMe SSD there. So this download doesn't compete with the root
+volume's 50GB at all:
 
 ```bash
 ollama pull qwen2.5-coder:14b
@@ -142,17 +146,16 @@ second SSH session for GPU utilization):
 ollama run qwen2.5-coder:14b "print('hello world')"
 ```
 
-> **NVMe instance-store caveat:** unlike the root EBS volume, `/opt/dlami/nvme` is
-> ephemeral instance storage — its contents are wiped whenever the instance is
-> **stopped** (not just terminated; a reboot is fine, a stop/start cycle is not). If
-> anything ever calls `ec2:StopInstances` on this host (this repo's Lambda only ever
-> **starts** a stopped instance in `ensure_backend_ready()`, it never stops one — but
-> a cost-saving cron job or manual stop would still wipe it), the ~9GB model has to be
-> re-pulled from scratch on the next start, adding several minutes to the next cold
-> start on top of the usual EC2-boot + Ollama-startup wait. If you stop this instance
-> regularly for cost reasons, store the model on the root EBS volume instead (drop the
-> `OLLAMA_MODELS` override) and accept the slower load, or snapshot/restore the NVMe
-> volume's contents as part of your stop/start automation.
+> **NVMe instance-store caveat:** whatever directory Ollama's models end up on, if
+> it's backed by NVMe instance storage rather than EBS, its contents are wiped
+> whenever the instance is **stopped** (not just terminated; a reboot is fine, a
+> stop/start cycle is not). This repo's Lambda only ever **starts** a stopped
+> instance in `ensure_backend_ready()`, it never stops one — but a cost-saving cron
+> job or manual stop would still wipe it, forcing a ~9GB re-pull on the next start and
+> adding several minutes to that cold start on top of the usual EC2-boot +
+> Ollama-startup wait. Run `df -h $(ollama_default_models_dir)` (or just check where
+> `/usr/share/ollama/.ollama` resolves to on your specific AMI) if you want to confirm
+> whether you're on NVMe or EBS before relying on this behavior.
 
 Note the instance's **private** IP — that becomes (parameter/env var name kept as-is
 for compatibility with the existing SAM parameter and CI/CD secret — it now points at
@@ -164,7 +167,7 @@ VLLM_ENDPOINT=http://<private-ip>:11434/v1
 
 Notes:
 - The `qwen2.5-coder:14b` tag defaults to a 4-bit (Q4_K_M) GGUF quantization at
-  roughly **9GB**, comfortably inside the T4's 16GB with room for KV cache at a
+  roughly **9GB**, comfortably inside the T4's 16GB VRAM with room for KV cache at a
   reasonable context length. If you want more headroom (e.g. for longer contexts or
   concurrent requests), `ollama pull qwen2.5-coder:7b` (~5GB) is the safer fallback.
 - No separate `--tool-call-parser`/`--chat-template` flags are needed — Ollama bakes
