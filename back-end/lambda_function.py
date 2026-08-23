@@ -34,6 +34,7 @@ from repo_tools import (
     GITHUB_TOOL_NAMES, GITLAB_TOOL_NAMES,
 )
 from github_oauth import handle_github_oauth_callback, get_user_integration, delete_user_integration
+from registry import FunctionRegistry
 
 
 VLLM_ENDPOINT = os.environ["VLLM_ENDPOINT"]
@@ -74,6 +75,7 @@ TOOLS = [{"type": "function", "function": {
 TOOLS = TOOLS + REPO_TOOL_DEFINITIONS
 
 
+function_registry = FunctionRegistry()
 
 def log_event(level, message, **fields):
     logger.log(level, json.dumps({
@@ -261,6 +263,44 @@ def call_vllm(messages, tools=None, stream=False):
     return resp
 
 
+@function_registry.register("action_pending")
+def action_pending(body, user_id, response_stream, trace_id):
+    action_id = body["action_id"]
+    item = pending_table.get_item(Key={"action_id": action_id}).get("Item")
+    if not item or item["user_id"] != user_id:
+        response_stream.write(b'{"error": "forbidden"}')
+        return
+    if body["decision"] == "approve":
+        gitlab_token = body.get("gitlab_token")
+        result = call_repo_tool(item["tool_name"], item["args"], user_id, gitlab_token=gitlab_token) \
+            if item["tool_name"] in FUNCS else "Unknown tool."
+    else:
+        result = "User denied this action."
+    pending_table.delete_item(Key={"action_id": action_id})
+    log_event(logging.INFO, "pending_action_resolved", user_id=user_id, decision=body["decision"], trace_id=trace_id)
+    response_stream.write(json.dumps({"result": str(result)}).encode())
+    return
+
+
+@function_registry.register("github_oauth_callback")
+def github_oauth_callback(body, user_id, response_stream, trace_id):
+    status_code, result = handle_github_oauth_callback(body, user_id)
+    log_event(logging.INFO, "github_oauth_callback", user_id=user_id, status_code=status_code, trace_id=trace_id)
+    response_stream.write(json.dumps(result).encode())
+    return
+
+
+@function_registry.register("disconnect_integration")
+def disconnect_integration(body, user_id, response_stream, trace_id):
+    provider = body.get("provider")
+    if provider == "github":
+        delete_user_integration(user_id, "github")
+        log_event(logging.INFO, "integration_disconnected", user_id=user_id, provider=provider, trace_id=trace_id)
+        response_stream.write(json.dumps({"disconnected": True, "provider": "github"}).encode())
+    else:
+        response_stream.write(json.dumps({"disconnected": True, "provider": provider, "server_side": False}).encode())
+    return
+
 
 @awslambda.streamifyResponse
 async def handler(event, response_stream, context):
@@ -287,44 +327,10 @@ async def handler(event, response_stream, context):
 
 
     body = json.loads(event.get("body", "{}"))
+    action = body.get("action")
 
-
-    if body.get("action") == "approve_pending":
-        action_id = body["action_id"]
-        item = pending_table.get_item(Key={"action_id": action_id}).get("Item")
-        if not item or item["user_id"] != user_id:
-            response_stream.write(b'{"error": "forbidden"}')
-            return
-        if body["decision"] == "approve":
-            gitlab_token = body.get("gitlab_token")
-            result = call_repo_tool(item["tool_name"], item["args"], user_id, gitlab_token=gitlab_token) \
-                if item["tool_name"] in FUNCS else "Unknown tool."
-        else:
-            result = "User denied this action."
-        pending_table.delete_item(Key={"action_id": action_id})
-        log_event(logging.INFO, "pending_action_resolved", user_id=user_id, decision=body["decision"], trace_id=trace_id)
-        response_stream.write(json.dumps({"result": str(result)}).encode())
-        return
-
-
-    if body.get("action") == "github_oauth_callback":
-        status_code, result = handle_github_oauth_callback(body, user_id)
-        log_event(logging.INFO, "github_oauth_callback", user_id=user_id, status_code=status_code, trace_id=trace_id)
-        response_stream.write(json.dumps(result).encode())
-        return
-
-
-    if body.get("action") == "disconnect_integration":
-        provider = body.get("provider")
-        if provider == "github":
-            delete_user_integration(user_id, "github")
-            log_event(logging.INFO, "integration_disconnected", user_id=user_id, provider=provider, trace_id=trace_id)
-            response_stream.write(json.dumps({"disconnected": True, "provider": "github"}).encode())
-        else:
-            # GitLab has no server-side record to delete today — its token
-            # lives only in the browser (see repo_tools.py's docstring).
-            response_stream.write(json.dumps({"disconnected": True, "provider": provider, "server_side": False}).encode())
-        return
+    if action:
+        return function_registry.execute(action, body, user_id, response_stream, trace_id)        
 
 
     conversation_id = body.get("conversation_id")
