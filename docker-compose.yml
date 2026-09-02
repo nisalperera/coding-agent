@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+    vllm-model:
+        build: ./vllm-model
+        container_name: vllm-model
+        ports:
+            - "8000:8000"
+        deploy:
+            resources:
+                reservations:
+                devices:
+                    - driver: nvidia
+                      count: all
+                      capabilities: [ gpu ]
+        volumes:
+            - ./vllm-model/huggingface:/root/.cache/huggingface
+
+    backend:
+        build: ./backend-end/fast-api
+        container_name: backend
+        ports:
+            - "8080:8080"
+
+    frontend:
+        build: ./front-end
+        container_name: frontend
+        ports:
+            - "3000:3000"
