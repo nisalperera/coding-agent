@@ -1,242 +1,343 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Nisal's Coding Agent</title>
-<meta name="description" content="Agentic coding assistant with repo-aware tools and RAG-backed answers." />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
+    <title>Nisal's Coding Agent</title>
+    <meta name="description" content="Agentic coding assistant with repo-aware tools and RAG-backed answers." />
 
 
-<!-- Tailwind CSS (utility framework, no build step required) -->
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    darkMode: 'class',
-    theme: {
-      extend: {
-        colors: {
-          brand: {
-            50: '#eef2ff', 100:'#e0e7ff', 200:'#c7d2fe', 300:'#a5b4fc',
-            400:'#818cf8', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca',
-            800:'#3730a3', 900:'#312e81'
-          }
+    <!-- Tailwind CSS (utility framework, no build step required) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc',
+                            400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca',
+                            800: '#3730a3', 900: '#312e81'
+                        }
+                    }
+                }
+            }
+        };
+    </script>
+
+
+    <!-- Markdown + syntax highlighting for assistant responses (code-focused agent) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+
+
+    <style>
+        html,
+        body {
+            height: 100%;
         }
-      }
-    }
-  };
-</script>
 
+        #chat::-webkit-scrollbar {
+            width: 8px;
+        }
 
-<!-- Markdown + syntax highlighting for assistant responses (code-focused agent) -->
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
+        #chat::-webkit-scrollbar-thumb {
+            background: rgba(100, 100, 100, .35);
+            border-radius: 8px;
+        }
 
+        .msg-enter {
+            animation: fadeSlideIn .25s ease-out;
+        }
 
-<style>
-  html, body { height: 100%; }
-  #chat::-webkit-scrollbar { width: 8px; }
-  #chat::-webkit-scrollbar-thumb { background: rgba(100,100,100,.35); border-radius: 8px; }
-  .msg-enter { animation: fadeSlideIn .25s ease-out; }
-  @keyframes fadeSlideIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: translateY(0); } }
-  #input { field-sizing: content; }
-  .typing-dot { animation: blink 1.2s infinite ease-in-out; }
-  .typing-dot:nth-child(2){ animation-delay:.2s; }
-  .typing-dot:nth-child(3){ animation-delay:.4s; }
-  @keyframes blink { 0%,80%,100%{ opacity:.2 } 40%{ opacity:1 } }
-  .prose-chat pre { border-radius: .5rem; }
-  .prose-chat code { word-break: break-word; }
-  .file-chip { animation: fadeSlideIn .2s ease-out; }
-  #drop-overlay { backdrop-filter: blur(2px); }
-  #integrations-modal { backdrop-filter: blur(2px); }
-</style>
+        @keyframes fadeSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        #input {
+            field-sizing: content;
+        }
+
+        .typing-dot {
+            animation: blink 1.2s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: .2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: .4s;
+        }
+
+        @keyframes blink {
+
+            0%,
+            80%,
+            100% {
+                opacity: .2
+            }
+
+            40% {
+                opacity: 1
+            }
+        }
+
+        .prose-chat pre {
+            border-radius: .5rem;
+        }
+
+        .prose-chat code {
+            word-break: break-word;
+        }
+
+        .file-chip {
+            animation: fadeSlideIn .2s ease-out;
+        }
+
+        #drop-overlay {
+            backdrop-filter: blur(2px);
+        }
+
+        #integrations-modal {
+            backdrop-filter: blur(2px);
+        }
+    </style>
 </head>
 
 
-<body class="h-screen flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors">
+<body
+    class="h-screen flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors">
 
 
-  <!-- Header / Auth bar -->
-  <header class="shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur sticky top-0 z-20">
-    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-      <div class="flex items-center gap-2 min-w-0">
-        <div class="h-8 w-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold shrink-0">CA</div>
-        <div class="min-w-0">
-          <h1 class="text-sm font-semibold leading-tight truncate">Nisal's Coding Agent</h1>
-          <p class="text-xs text-slate-500 dark:text-slate-400 truncate">Agentic AI &amp; RAG assistant</p>
-        </div>
-      </div>
-
-
-      <div id="auth-bar" class="flex items-center gap-2">
-        <div id="auth-signed-out" class="flex items-center gap-2">
-          <button onclick="loginWithProvider('Google')"
-            class="text-xs sm:text-sm px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-            Sign in with Google
-          </button>
-        </div>
-        <div id="auth-signed-in" class="hidden items-center gap-2 flex-wrap justify-end">
-          <span id="user-email" class="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 truncate max-w-[8rem]"></span>
-          <button id="github-auth-btn" onclick="connectGitHub()"
-            class="flex items-center gap-1.5 text-xs sm:text-sm px-3 py-1.5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-3.5 w-3.5 shrink-0">
-              <path d="M12 .5C5.73.5.98 5.24.98 11.5c0 4.86 3.15 8.98 7.52 10.43.55.1.75-.24.75-.53v-2.06c-3.06.66-3.7-1.3-3.7-1.3-.5-1.27-1.22-1.6-1.22-1.6-1-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.68 2.57 1.2 3.2.91.1-.71.39-1.2.71-1.47-2.44-.28-5-1.22-5-5.42 0-1.2.43-2.18 1.13-2.95-.11-.28-.49-1.4.11-2.92 0 0 .93-.3 3.04 1.13a10.5 10.5 0 0 1 5.54 0c2.11-1.43 3.04-1.13 3.04-1.13.6 1.52.22 2.64.11 2.92.7.77 1.13 1.75 1.13 2.95 0 4.21-2.57 5.14-5.02 5.41.4.35.75 1.03.75 2.08v3.08c0 .29.2.64.76.53 4.36-1.46 7.51-5.58 7.51-10.43C23.02 5.24 18.27.5 12 .5Z"/>
-            </svg>
-            <span id="github-auth-btn-label">Connect GitHub</span>
-          </button>
-          <button id="gitlab-auth-btn" onclick="connectGitLab()"
-            class="flex items-center gap-1.5 text-xs sm:text-sm px-3 py-1.5 rounded-full bg-orange-600 text-white hover:bg-orange-700 transition">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-3.5 w-3.5 shrink-0">
-              <path d="M12 21.42 15.6 10.2H8.4L12 21.42Z"/><path d="M4.2 10.2 2.4 15.6 12 21.42 4.2 10.2Z" opacity=".7"/><path d="M4.2 10.2h4.2L6.6 4.02a.42.42 0 0 0-.8 0L4.2 10.2Z"/><path d="M19.8 10.2l1.8 5.4L12 21.42 19.8 10.2Z" opacity=".7"/><path d="M19.8 10.2h-4.2l1.8-6.18a.42.42 0 0 1 .8 0l1.6 6.18Z"/>
-            </svg>
-            <span id="gitlab-auth-btn-label">Connect GitLab</span>
-          </button>
-          <button onclick="openIntegrationsModal()" aria-label="Repository integrations"
-            class="h-8 w-8 shrink-0 rounded-full border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center justify-center text-sm relative">
-            <span>🔗</span>
-            <span id="integrations-dot" class="hidden absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500"></span>
-          </button>
-          <button onclick="logout()"
-            class="text-xs sm:text-sm px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-            Log out
-          </button>
-        </div>
-        <button onclick="toggleTheme()" aria-label="Toggle theme"
-          class="h-8 w-8 shrink-0 rounded-full border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center justify-center text-sm">
-          <span id="theme-icon">🌙</span>
-        </button>
-      </div>
-    </div>
-  </header>
-
-
-  <!-- Chat log -->
-  <main id="chat" class="flex-1 overflow-y-auto relative">
-    <div class="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-4">
-      <div id="empty-state" class="text-center text-slate-400 dark:text-slate-500 py-16">
-        <div class="text-3xl mb-2">🤖</div>
-        <p class="text-sm">Ask about your repo, request an edit, paste an error, or attach a file to debug.</p>
-      </div>
-    </div>
-    <div id="drop-overlay" class="hidden absolute inset-0 z-30 bg-brand-600/10 border-2 border-dashed border-brand-500 rounded-lg m-2 items-center justify-center">
-      <p class="text-brand-700 dark:text-brand-300 font-medium text-sm sm:text-base">Drop files to attach</p>
-    </div>
-  </main>
-
-
-  <!-- Typing indicator -->
-  <div id="typing-indicator" class="hidden max-w-3xl mx-auto w-full px-4 pb-1 -mt-2">
-    <div class="flex items-center gap-1 text-slate-400 text-sm pl-11">
-      <span class="typing-dot h-1.5 w-1.5 rounded-full bg-slate-400 inline-block"></span>
-      <span class="typing-dot h-1.5 w-1.5 rounded-full bg-slate-400 inline-block"></span>
-      <span class="typing-dot h-1.5 w-1.5 rounded-full bg-slate-400 inline-block"></span>
-    </div>
-  </div>
-
-
-  <!-- Composer -->
-  <footer class="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
-    <div class="max-w-3xl mx-auto px-4 py-3">
-
-
-      <!-- Attached file chips -->
-      <div id="file-chips" class="hidden flex flex-wrap gap-2 mb-2"></div>
-
-
-      <div class="flex items-end gap-2 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-brand-500">
-        <input id="file-input" type="file" multiple class="hidden" onchange="handleFileSelect(this.files)" />
-        <button type="button" onclick="document.getElementById('file-input').click()" aria-label="Attach file"
-          class="h-9 w-9 shrink-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center transition">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21.44 11.05 12.25 20.24a5.5 5.5 0 0 1-7.78-7.78l8.49-8.48a3.5 3.5 0 0 1 4.95 4.95l-8.49 8.49a1.5 1.5 0 0 1-2.12-2.12l7.07-7.07"/>
-          </svg>
-        </button>
-        <textarea id="input" rows="1" placeholder="Message the coding agent..."
-          class="flex-1 resize-none bg-transparent outline-none text-sm sm:text-base max-h-40 py-1.5"
-          oninput="autoResize(this)" onkeydown="handleKeydown(event)"></textarea>
-        <button id="send-btn" onclick="send()" aria-label="Send message"
-          class="h-9 w-9 shrink-0 rounded-full bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center transition">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4 -rotate-90">
-            <path d="M3.4 20.6 22 12 3.4 3.4 3 10l13 2-13 2z"/>
-          </svg>
-        </button>
-      </div>
-      <p class="text-[11px] text-slate-400 mt-1.5 text-center">Enter to send &middot; Shift+Enter for a new line &middot; Attach files up to 2&nbsp;MB each</p>
-    </div>
-  </footer>
-
-
-  <!-- Integrations modal (GitHub / GitLab repo authorization) -->
-  <div id="integrations-modal" class="hidden fixed inset-0 z-40 bg-slate-900/40 items-center justify-center p-4">
-    <div class="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-5">
-      <div class="flex items-center justify-between mb-1">
-        <h2 class="text-base font-semibold">Repository access</h2>
-        <button onclick="closeIntegrationsModal()" aria-label="Close"
-          class="h-7 w-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-500">&times;</button>
-      </div>
-      <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
-        Connect GitHub and/or GitLab so the agent can read and push changes to your own repositories, in
-        addition to any shared service-level access already configured.
-      </p>
-
-
-      <div class="space-y-3">
-        <!-- GitHub card -->
-        <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-          <div class="flex items-center gap-3 min-w-0">
-            <div class="h-9 w-9 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-5 w-5">
-                <path d="M12 .5C5.73.5.98 5.24.98 11.5c0 4.86 3.15 8.98 7.52 10.43.55.1.75-.24.75-.53v-2.06c-3.06.66-3.7-1.3-3.7-1.3-.5-1.27-1.22-1.6-1.22-1.6-1-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.68 2.57 1.2 3.2.91.1-.71.39-1.2.71-1.47-2.44-.28-5-1.22-5-5.42 0-1.2.43-2.18 1.13-2.95-.11-.28-.49-1.4.11-2.92 0 0 .93-.3 3.04 1.13a10.5 10.5 0 0 1 5.54 0c2.11-1.43 3.04-1.13 3.04-1.13.6 1.52.22 2.64.11 2.92.7.77 1.13 1.75 1.13 2.95 0 4.21-2.57 5.14-5.02 5.41.4.35.75 1.03.75 2.08v3.08c0 .29.2.64.76.53 4.36-1.46 7.51-5.58 7.51-10.43C23.02 5.24 18.27.5 12 .5Z"/>
-              </svg>
+    <!-- Header / Auth bar -->
+    <header
+        class="shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur sticky top-0 z-20">
+        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <div class="flex items-center gap-2 min-w-0">
+                <img src="assets/logo.jpeg" alt="Nisal's Coding Agent logo"
+                    class="h-8 w-8 rounded-lg object-cover shrink-0" />
+                <div class="min-w-0">
+                    <h1 class="text-sm font-semibold leading-tight truncate">Nisal's Coding Agent</h1>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 truncate">Agentic AI &amp; RAG assistant</p>
+                </div>
             </div>
-            <div class="min-w-0">
-              <p class="text-sm font-medium">GitHub</p>
-              <p id="github-status-text" class="text-xs text-slate-500 dark:text-slate-400 truncate">Not connected</p>
+
+
+            <div id="auth-bar" class="flex items-center gap-2">
+                <div id="auth-signed-out" class="flex items-center gap-2">
+                    <button onclick="loginWithProvider('Google')"
+                        class="text-xs sm:text-sm px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+                        Sign in with Google
+                    </button>
+                </div>
+                <div id="auth-signed-in" class="hidden items-center gap-2 flex-wrap justify-end">
+                    <span id="user-email"
+                        class="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 truncate max-w-[8rem]"></span>
+                    <button id="github-auth-btn" onclick="connectGitHub()"
+                        class="flex items-center gap-1.5 text-xs sm:text-sm px-3 py-1.5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                            class="h-3.5 w-3.5 shrink-0">
+                            <path
+                                d="M12 .5C5.73.5.98 5.24.98 11.5c0 4.86 3.15 8.98 7.52 10.43.55.1.75-.24.75-.53v-2.06c-3.06.66-3.7-1.3-3.7-1.3-.5-1.27-1.22-1.6-1.22-1.6-1-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.68 2.57 1.2 3.2.91.1-.71.39-1.2.71-1.47-2.44-.28-5-1.22-5-5.42 0-1.2.43-2.18 1.13-2.95-.11-.28-.49-1.4.11-2.92 0 0 .93-.3 3.04 1.13a10.5 10.5 0 0 1 5.54 0c2.11-1.43 3.04-1.13 3.04-1.13.6 1.52.22 2.64.11 2.92.7.77 1.13 1.75 1.13 2.95 0 4.21-2.57 5.14-5.02 5.41.4.35.75 1.03.75 2.08v3.08c0 .29.2.64.76.53 4.36-1.46 7.51-5.58 7.51-10.43C23.02 5.24 18.27.5 12 .5Z" />
+                        </svg>
+                        <span id="github-auth-btn-label">Connect GitHub</span>
+                    </button>
+                    <button id="gitlab-auth-btn" onclick="connectGitLab()"
+                        class="flex items-center gap-1.5 text-xs sm:text-sm px-3 py-1.5 rounded-full bg-orange-600 text-white hover:bg-orange-700 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                            class="h-3.5 w-3.5 shrink-0">
+                            <path d="M12 21.42 15.6 10.2H8.4L12 21.42Z" />
+                            <path d="M4.2 10.2 2.4 15.6 12 21.42 4.2 10.2Z" opacity=".7" />
+                            <path d="M4.2 10.2h4.2L6.6 4.02a.42.42 0 0 0-.8 0L4.2 10.2Z" />
+                            <path d="M19.8 10.2l1.8 5.4L12 21.42 19.8 10.2Z" opacity=".7" />
+                            <path d="M19.8 10.2h-4.2l1.8-6.18a.42.42 0 0 1 .8 0l1.6 6.18Z" />
+                        </svg>
+                        <span id="gitlab-auth-btn-label">Connect GitLab</span>
+                    </button>
+                    <button onclick="openIntegrationsModal()" aria-label="Repository integrations"
+                        class="h-8 w-8 shrink-0 rounded-full border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center justify-center text-sm relative">
+                        <span>🔗</span>
+                        <span id="integrations-dot"
+                            class="hidden absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500"></span>
+                    </button>
+                    <button onclick="logout()"
+                        class="text-xs sm:text-sm px-3 py-1.5 rounded-full border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+                        Log out
+                    </button>
+                </div>
+                <button onclick="toggleTheme()" aria-label="Toggle theme"
+                    class="h-8 w-8 shrink-0 rounded-full border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center justify-center text-sm">
+                    <span id="theme-icon">🌙</span>
+                </button>
             </div>
-          </div>
-          <button id="github-connect-btn" onclick="connectGitHub()"
-            class="text-xs px-3 py-1.5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition shrink-0">
-            Connect
-          </button>
         </div>
+    </header>
 
 
-        <!-- GitLab card -->
-        <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-          <div class="flex items-center gap-3 min-w-0">
-            <div class="h-9 w-9 rounded-lg bg-orange-600 text-white flex items-center justify-center shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-5 w-5">
-                <path d="M12 21.42 15.6 10.2H8.4L12 21.42Z"/><path d="M4.2 10.2 2.4 15.6 12 21.42 4.2 10.2Z" opacity=".7"/><path d="M4.2 10.2h4.2L6.6 4.02a.42.42 0 0 0-.8 0L4.2 10.2Z"/><path d="M19.8 10.2l1.8 5.4L12 21.42 19.8 10.2Z" opacity=".7"/><path d="M19.8 10.2h-4.2l1.8-6.18a.42.42 0 0 1 .8 0l1.6 6.18Z"/>
-              </svg>
+    <!-- Chat log -->
+    <main id="chat" class="flex-1 overflow-y-auto relative">
+        <div class="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-4">
+            <div id="empty-state" class="text-center text-slate-400 dark:text-slate-500 py-16">
+                <div class="text-3xl mb-2">🤖</div>
+                <p class="text-sm">Ask about your repo, request an edit, paste an error, or attach a file to debug.</p>
             </div>
-            <div class="min-w-0">
-              <p class="text-sm font-medium">GitLab</p>
-              <p id="gitlab-status-text" class="text-xs text-slate-500 dark:text-slate-400 truncate">Not connected</p>
-            </div>
-          </div>
-          <button id="gitlab-connect-btn" onclick="connectGitLab()"
-            class="text-xs px-3 py-1.5 rounded-full bg-orange-600 text-white hover:bg-orange-700 transition shrink-0">
-            Connect
-          </button>
         </div>
-      </div>
+        <div id="drop-overlay"
+            class="hidden absolute inset-0 z-30 bg-brand-600/10 border-2 border-dashed border-brand-500 rounded-lg m-2 items-center justify-center">
+            <p class="text-brand-700 dark:text-brand-300 font-medium text-sm sm:text-base">Drop files to attach</p>
+        </div>
+    </main>
 
 
-      <p class="text-[11px] text-slate-400 mt-4">
-        Disconnecting GitHub revokes the token stored on the server as well as clearing this browser.
-        Disconnecting GitLab only clears the token stored in this browser (GitLab tokens are never sent
-        to or stored on the server) — to fully revoke it, or to revoke either provider from the other
-        side, visit your
-        <a class="underline" href="https://github.com/settings/applications" target="_blank" rel="noopener">GitHub</a> or
-        <a class="underline" href="https://gitlab.com/-/profile/applications" target="_blank" rel="noopener">GitLab</a>
-        application settings.
-      </p>
+    <!-- Typing indicator -->
+    <div id="typing-indicator" class="hidden max-w-3xl mx-auto w-full px-4 pb-1 -mt-2">
+        <div class="flex items-center gap-1 text-slate-400 text-sm pl-11">
+            <span class="typing-dot h-1.5 w-1.5 rounded-full bg-slate-400 inline-block"></span>
+            <span class="typing-dot h-1.5 w-1.5 rounded-full bg-slate-400 inline-block"></span>
+            <span class="typing-dot h-1.5 w-1.5 rounded-full bg-slate-400 inline-block"></span>
+        </div>
     </div>
-  </div>
 
 
-  <!-- Runtime config must load before app.js since app.js reads window.APP_CONFIG -->
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+    <!-- Composer -->
+    <footer
+        class="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
+        <div class="max-w-3xl mx-auto px-4 py-3">
+
+
+            <!-- Attached file chips -->
+            <div id="file-chips" class="hidden flex flex-wrap gap-2 mb-2"></div>
+
+
+            <div
+                class="flex items-end gap-2 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-brand-500">
+                <input id="file-input" type="file" multiple class="hidden" onchange="handleFileSelect(this.files)" />
+                <button type="button" onclick="document.getElementById('file-input').click()" aria-label="Attach file"
+                    class="h-9 w-9 shrink-0 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" class="h-5 w-5">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M21.44 11.05 12.25 20.24a5.5 5.5 0 0 1-7.78-7.78l8.49-8.48a3.5 3.5 0 0 1 4.95 4.95l-8.49 8.49a1.5 1.5 0 0 1-2.12-2.12l7.07-7.07" />
+                    </svg>
+                </button>
+                <textarea id="input" rows="1" placeholder="Message the coding agent..."
+                    class="flex-1 resize-none bg-transparent outline-none text-sm sm:text-base max-h-40 py-1.5"
+                    oninput="autoResize(this)" onkeydown="handleKeydown(event)"></textarea>
+                <button id="send-btn" onclick="send()" aria-label="Send message"
+                    class="h-9 w-9 shrink-0 rounded-full bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                        class="h-4 w-4 -rotate-90">
+                        <path d="M3.4 20.6 22 12 3.4 3.4 3 10l13 2-13 2z" />
+                    </svg>
+                </button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1.5 text-center">Enter to send &middot; Shift+Enter for a new line
+                &middot; Attach files up to 2&nbsp;MB each</p>
+        </div>
+    </footer>
+
+
+    <!-- Integrations modal (GitHub / GitLab repo authorization) -->
+    <div id="integrations-modal" class="hidden fixed inset-0 z-40 bg-slate-900/40 items-center justify-center p-4">
+        <div
+            class="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-5">
+            <div class="flex items-center justify-between mb-1">
+                <h2 class="text-base font-semibold">Repository access</h2>
+                <button onclick="closeIntegrationsModal()" aria-label="Close"
+                    class="h-7 w-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-500">&times;</button>
+            </div>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Connect GitHub and/or GitLab so the agent can read and push changes to your own repositories, in
+                addition to any shared service-level access already configured.
+            </p>
+
+
+            <div class="space-y-3">
+                <!-- GitHub card -->
+                <div
+                    class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <div
+                            class="h-9 w-9 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                                class="h-5 w-5">
+                                <path
+                                    d="M12 .5C5.73.5.98 5.24.98 11.5c0 4.86 3.15 8.98 7.52 10.43.55.1.75-.24.75-.53v-2.06c-3.06.66-3.7-1.3-3.7-1.3-.5-1.27-1.22-1.6-1.22-1.6-1-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.68 2.57 1.2 3.2.91.1-.71.39-1.2.71-1.47-2.44-.28-5-1.22-5-5.42 0-1.2.43-2.18 1.13-2.95-.11-.28-.49-1.4.11-2.92 0 0 .93-.3 3.04 1.13a10.5 10.5 0 0 1 5.54 0c2.11-1.43 3.04-1.13 3.04-1.13.6 1.52.22 2.64.11 2.92.7.77 1.13 1.75 1.13 2.95 0 4.21-2.57 5.14-5.02 5.41.4.35.75 1.03.75 2.08v3.08c0 .29.2.64.76.53 4.36-1.46 7.51-5.58 7.51-10.43C23.02 5.24 18.27.5 12 .5Z" />
+                            </svg>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-sm font-medium">GitHub</p>
+                            <p id="github-status-text" class="text-xs text-slate-500 dark:text-slate-400 truncate">Not
+                                connected</p>
+                        </div>
+                    </div>
+                    <button id="github-connect-btn" onclick="connectGitHub()"
+                        class="text-xs px-3 py-1.5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition shrink-0">
+                        Connect
+                    </button>
+                </div>
+
+
+                <!-- GitLab card -->
+                <div
+                    class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <div
+                            class="h-9 w-9 rounded-lg bg-orange-600 text-white flex items-center justify-center shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                                class="h-5 w-5">
+                                <path d="M12 21.42 15.6 10.2H8.4L12 21.42Z" />
+                                <path d="M4.2 10.2 2.4 15.6 12 21.42 4.2 10.2Z" opacity=".7" />
+                                <path d="M4.2 10.2h4.2L6.6 4.02a.42.42 0 0 0-.8 0L4.2 10.2Z" />
+                                <path d="M19.8 10.2l1.8 5.4L12 21.42 19.8 10.2Z" opacity=".7" />
+                                <path d="M19.8 10.2h-4.2l1.8-6.18a.42.42 0 0 1 .8 0l1.6 6.18Z" />
+                            </svg>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-sm font-medium">GitLab</p>
+                            <p id="gitlab-status-text" class="text-xs text-slate-500 dark:text-slate-400 truncate">Not
+                                connected</p>
+                        </div>
+                    </div>
+                    <button id="gitlab-connect-btn" onclick="connectGitLab()"
+                        class="text-xs px-3 py-1.5 rounded-full bg-orange-600 text-white hover:bg-orange-700 transition shrink-0">
+                        Connect
+                    </button>
+                </div>
+            </div>
+
+
+            <p class="text-[11px] text-slate-400 mt-4">
+                Disconnecting GitHub revokes the token stored on the server as well as clearing this browser.
+                Disconnecting GitLab only clears the token stored in this browser (GitLab tokens are never sent
+                to or stored on the server) — to fully revoke it, or to revoke either provider from the other
+                side, visit your
+                <a class="underline" href="https://github.com/settings/applications" target="_blank"
+                    rel="noopener">GitHub</a> or
+                <a class="underline" href="https://gitlab.com/-/profile/applications" target="_blank"
+                    rel="noopener">GitLab</a>
+                application settings.
+            </p>
+        </div>
+    </div>
+
+
+    <!-- Runtime config must load before app.js since app.js reads window.APP_CONFIG -->
+    <script src="config.js"></script>
+    <script src="app.js"></script>
 </body>
+
 </html>
