@@ -1,4 +1,7 @@
 # front-end/local/Dockerfile
+# Only NEXT_PUBLIC_BACKEND_URL is intentionally included in the browser
+# bundle. GitHub/GitLab OAuth configuration remains backend-only.
+
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
@@ -10,11 +13,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ARG NEXT_PUBLIC_BACKEND_URL
-ARG NEXT_PUBLIC_GITHUB_OAUTH_CLIENT_ID
-ARG NEXT_PUBLIC_GITLAB_OAUTH_CLIENT_ID
 ENV NEXT_PUBLIC_BACKEND_URL=$NEXT_PUBLIC_BACKEND_URL
-ENV NEXT_PUBLIC_GITHUB_OAUTH_CLIENT_ID=$NEXT_PUBLIC_GITHUB_OAUTH_CLIENT_ID
-ENV NEXT_PUBLIC_GITLAB_OAUTH_CLIENT_ID=$NEXT_PUBLIC_GITLAB_OAUTH_CLIENT_ID
 
 RUN npm run build
 
