@@ -128,6 +128,34 @@ class Settings:
         _optional("SQLITE_DB_PATH", "data/coding_agent.db")
     )
 
+    # Google OpenID Connect
+    GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
+    OAUTH_STATE_COOKIE_NAME = "google_oauth_state"
+
+    # vLLM
+    VLLM_ENDPOINT = "http://127.0.0.1:8001/v1/chat/completions"
+    VLLM_HEALTH_ENDPOINT = "http://127.0.0.1:8001/health"
+    MODEL_NAME = "local-model"
+    STARTUP_BUDGET_S = 120
+    POLL_INTERVAL_S = 2.0
+    RETRY_AFTER_S = 60
+
+    # In-memory rate limiter
+    RATE_LIMIT_MAX_REQUESTS = 60
+    RATE_LIMIT_WINDOW_S = 60
+
+    # Legacy repository API compatibility
+    GITHUB_API = "https://api.github.com"
+    GITLAB_API = "https://gitlab.com/api/v4"
+
+    # Explicitly gated development-only legacy fallback
+    ALLOW_LEGACY_PROVIDER_TOKEN_FALLBACK: bool = _as_bool(
+        "ALLOW_LEGACY_PROVIDER_TOKEN_FALLBACK",
+        False,
+    )
+    GITHUB_TOKEN = ""
+    GITLAB_TOKEN = ""
+
     @classmethod
     def validate(cls) -> None:
         if cls.DATABASE_POOL_SIZE < 1:
@@ -147,9 +175,14 @@ class Settings:
 
         local_env = cls.APP_ENV in {"development", "test"}
         for name in (
-            "GOOGLE_REDIRECT_URI",
-            "GITHUB_OAUTH_REDIRECT_URI",
-            "GITLAB_OAUTH_REDIRECT_URI",
+            "GOOGLE_DISCOVERY_URL",
+            "GITHUB_API",
+            "GITLAB_API",
+            "VLLM_ENDPOINT",
+            "VLLM_HEALTH_ENDPOINT",
+            "GITLAB_AUTHORIZE_URL",
+            "GITLAB_TOKEN_URL",
+            "GITLAB_USER_URL",
         ):
             value = getattr(cls, name)
             if value:

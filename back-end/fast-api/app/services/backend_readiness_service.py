@@ -34,7 +34,7 @@ def _try_autostart_local_vllm(trace_id: str) -> None:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        log_event(logging.INFO, "vllm_autostart_launched", command=VLLM_AUTOSTART_CMD, trace_id=trace_id)
+        log_event(logging.INFO, "vllm_autostart_launched", trace_id=trace_id)
     except Exception as exc:
         log_event(logging.ERROR, "vllm_autostart_failed", error=str(exc), trace_id=trace_id)
 
