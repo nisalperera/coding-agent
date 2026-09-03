@@ -1,163 +1,87 @@
+// front-end/local/lib/integrations.js
+//
+// GitHub and GitLab repository-access integrations.
+//
+// Both providers are handled entirely server-side by the FastAPI backend.
+// This browser module holds no OAuth client ID, client secret, PKCE
+// verifier, authorization state, or provider access token. Its only job is
+// to navigate to backend-owned login endpoints and fetch provider status.
+//
+// Backend contract:
+//   GET /v1/auth/github/login
+//   GET /v1/auth/gitlab/login
+//   GET /v1/integrations/status
+//   POST /v1/actions { action: "disconnect_integration", provider }
+
 'use client';
 
 import { apiFetch, ApiError } from './api';
-import { generateRandomToken, generateCodeChallenge } from './pkce';
 import { APP_CONFIG } from './config';
 
-const GITHUB_CLIENT_ID = APP_CONFIG.GITHUB_OAUTH_CLIENT_ID;
-const GITHUB_SCOPES = 'repo read:user';
+const BACKEND_URL = APP_CONFIG.BACKEND_URL;
 
-const GITLAB_CLIENT_ID = APP_CONFIG.GITLAB_OAUTH_CLIENT_ID;
-const GITLAB_OAUTH_DOMAIN = 'https://gitlab.com';
-const GITLAB_SCOPES = 'api read_repository write_repository';
-
-function githubRedirectUri() {
-  return `${window.location.origin}/callback/github`;
-}
-
-function gitlabRedirectUri() {
-  return `${window.location.origin}/callback/gitlab`;
-}
-
-export function isGitHubConnected() {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem('github_connected') === 'true';
-}
-
-export function getGitHubUsername() {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('github_username') || '';
-}
-
+/** Full-page redirect to the backend-owned GitHub OAuth login endpoint. */
 export function connectGitHub() {
-  const state = generateRandomToken();
-  sessionStorage.setItem('github_oauth_state', state);
-  const params = new URLSearchParams({
-    client_id: GITHUB_CLIENT_ID,
-    redirect_uri: githubRedirectUri(),
-    scope: GITHUB_SCOPES,
-    state,
-    allow_signup: 'false',
-  });
-  window.location.href = `https://github.com/login/oauth/authorize?${params}`;
+  window.location.href = `${BACKEND_URL}/v1/auth/github/login`;
 }
 
-export async function handleGitHubCallback() {
-  const url = new URL(window.location.href);
-  const code = url.searchParams.get('code');
-  const state = url.searchParams.get('state');
-  const expected = sessionStorage.getItem('github_oauth_state');
-  sessionStorage.removeItem('github_oauth_state');
+/** Full-page redirect to the backend-owned GitLab OAuth login endpoint. */
+export function connectGitLab() {
+  window.location.href = `${BACKEND_URL}/v1/auth/gitlab/login`;
+}
 
-  if (!code) return null;
-  if (!state || state !== expected) {
-    return { ok: false, message: 'GitHub connection failed: state mismatch. Please try connecting again.' };
-  }
-
+/**
+ * Reads integration state from the backend, the source of truth now that
+ * neither provider token is kept in browser storage. Expected response:
+ * {
+ *   github: { connected: boolean, username?: string },
+ *   gitlab: { connected: boolean }
+ * }
+ */
+export async function getIntegrationsStatus() {
   try {
-    const data = await apiFetch('/v1/actions', {
-      method: 'POST',
-      body: { action: 'github_oauth_callback', code, redirect_uri: githubRedirectUri() },
-    });
-    localStorage.setItem('github_connected', 'true');
-    localStorage.setItem('github_username', data.username || '');
-    return { ok: true, message: `GitHub connected${data.username ? ` as **@${data.username}**` : ''}.` };
-  } catch (err) {
-    const detail = err instanceof ApiError ? err.message : String(err);
-    return { ok: false, message: `Could not finish connecting GitHub (${detail}).` };
+    const data = await apiFetch('/v1/integrations/status');
+    return {
+      github: {
+        connected: Boolean(data?.github?.connected),
+        username: data?.github?.username ?? '',
+      },
+      gitlab: {
+        connected: Boolean(data?.gitlab?.connected),
+      },
+    };
+  } catch {
+    return {
+      github: { connected: false, username: '' },
+      gitlab: { connected: false },
+    };
   }
 }
 
+/** Revokes GitHub's backend-stored integration token. */
 export async function disconnectGitHub() {
-  let warning = null;
   try {
     await apiFetch('/v1/actions', {
       method: 'POST',
       body: { action: 'disconnect_integration', provider: 'github' },
     });
+    return { ok: true, message: 'GitHub disconnected.' };
   } catch (err) {
     const detail = err instanceof ApiError ? err.message : String(err);
-    warning = `Could not confirm GitHub token removal on the server (${detail}). Cleared locally; if this keeps happening, revoke access from GitHub settings directly.`;
+    return { ok: false, message: `Could not disconnect GitHub (${detail}).` };
   }
-
-  localStorage.removeItem('github_connected');
-  localStorage.removeItem('github_username');
-
-  return warning
-    ? { ok: false, message: warning }
-    : { ok: true, message: 'GitHub disconnected -- the stored server-side token was revoked.' };
 }
 
-export function isGitLabConnected() {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem('gitlab_connected') === 'true';
-}
-
-export function getGitLabAccessToken() {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('gitlab_access_token');
-}
-
-export async function connectGitLab() {
-  const verifier = generateRandomToken();
-  sessionStorage.setItem('gitlab_pkce_verifier', verifier);
-  const state = generateRandomToken();
-  sessionStorage.setItem('gitlab_oauth_state', state);
-  const challenge = await generateCodeChallenge(verifier);
-
-  const params = new URLSearchParams({
-    client_id: GITLAB_CLIENT_ID,
-    redirect_uri: gitlabRedirectUri(),
-    response_type: 'code',
-    scope: GITLAB_SCOPES,
-    state,
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-  });
-  window.location.href = `${GITLAB_OAUTH_DOMAIN}/oauth/authorize?${params}`;
-}
-
-export async function handleGitLabCallback() {
-  const url = new URL(window.location.href);
-  const code = url.searchParams.get('code');
-  const state = url.searchParams.get('state');
-  const expected = sessionStorage.getItem('gitlab_oauth_state');
-  const verifier = sessionStorage.getItem('gitlab_pkce_verifier');
-  sessionStorage.removeItem('gitlab_oauth_state');
-  sessionStorage.removeItem('gitlab_pkce_verifier');
-
-  if (!code) return null;
-  if (!state || state !== expected) {
-    return { ok: false, message: 'GitLab connection failed: state mismatch. Please try connecting again.' };
-  }
-
+/** Revokes GitLab's backend-stored integration token. */
+export async function disconnectGitLab() {
   try {
-    const resp = await fetch(`${GITLAB_OAUTH_DOMAIN}/oauth/token`, {
+    await apiFetch('/v1/actions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: GITLAB_CLIENT_ID,
-        code,
-        grant_type: 'authorization_code',
-        redirect_uri: gitlabRedirectUri(),
-        code_verifier: verifier,
-      }),
+      body: { action: 'disconnect_integration', provider: 'gitlab' },
     });
-    if (!resp.ok) throw new Error(`GitLab returned ${resp.status}`);
-    const tokens = await resp.json();
-    localStorage.setItem('gitlab_access_token', tokens.access_token);
-    localStorage.setItem('gitlab_refresh_token', tokens.refresh_token || '');
-    localStorage.setItem('gitlab_connected', 'true');
-    return { ok: true, message: 'GitLab connected.' };
+    return { ok: true, message: 'GitLab disconnected.' };
   } catch (err) {
-    return { ok: false, message: `Could not finish connecting GitLab (${err.message}).` };
+    const detail = err instanceof ApiError ? err.message : String(err);
+    return { ok: false, message: `Could not disconnect GitLab (${detail}).` };
   }
-}
-
-export function disconnectGitLab() {
-  localStorage.removeItem('gitlab_connected');
-  localStorage.removeItem('gitlab_access_token');
-  localStorage.removeItem('gitlab_refresh_token');
-  localStorage.removeItem('gitlab_username');
-  return { ok: true, message: 'GitLab disconnected from this browser.' };
 }
