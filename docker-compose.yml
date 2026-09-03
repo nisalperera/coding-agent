@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
     # vllm-model:
     #     build: ./vllm-model
@@ -27,7 +26,13 @@ services:
             - ./back-end/fast-api/.env
 
     frontend:
-        build: ./front-end
+        build:
+            context: ./front-end/local
+            dockerfile: Dockerfile
+            args:
+                NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL}
+                NEXT_PUBLIC_GITHUB_OAUTH_CLIENT_ID: ${NEXT_PUBLIC_GITHUB_OAUTH_CLIENT_ID}
+                NEXT_PUBLIC_GITLAB_OAUTH_CLIENT_ID: ${NEXT_PUBLIC_GITLAB_OAUTH_CLIENT_ID}
         container_name: frontend
         ports:
             - "3000:3000"
