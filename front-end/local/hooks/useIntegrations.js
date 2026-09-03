@@ -1,14 +1,18 @@
+// front-end/local/hooks/useIntegrations.js
+//
+// React state wrapper around lib/integrations.js. Connection status comes
+// from the backend (GET /v1/integrations/status) because neither GitHub nor
+// GitLab tokens, OAuth client IDs, or OAuth state live in the browser.
+
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  isGitHubConnected,
-  getGitHubUsername,
   connectGitHub,
   disconnectGitHub,
-  isGitLabConnected,
   connectGitLab,
   disconnectGitLab,
+  getIntegrationsStatus,
 } from '../lib/integrations';
 
 export function useIntegrations(onMessage) {
@@ -16,10 +20,11 @@ export function useIntegrations(onMessage) {
   const [githubUsername, setGithubUsername] = useState('');
   const [gitlabConnected, setGitlabConnected] = useState(false);
 
-  const refresh = useCallback(() => {
-    setGithubConnected(isGitHubConnected());
-    setGithubUsername(getGitHubUsername());
-    setGitlabConnected(isGitLabConnected());
+  const refresh = useCallback(async () => {
+    const status = await getIntegrationsStatus();
+    setGithubConnected(status.github.connected);
+    setGithubUsername(status.github.username);
+    setGitlabConnected(status.gitlab.connected);
   }, []);
 
   useEffect(() => {
@@ -27,16 +32,24 @@ export function useIntegrations(onMessage) {
   }, [refresh]);
 
   const toggleGitHub = useCallback(async () => {
-    const result = isGitHubConnected() ? await disconnectGitHub() : connectGitHub();
-    if (result?.message) onMessage?.(result.message);
-    refresh();
-  }, [refresh, onMessage]);
+    if (githubConnected) {
+      const result = await disconnectGitHub();
+      if (result?.message) onMessage?.(result.message);
+      refresh();
+    } else {
+      connectGitHub();
+    }
+  }, [githubConnected, refresh, onMessage]);
 
   const toggleGitLab = useCallback(async () => {
-    const result = isGitLabConnected() ? disconnectGitLab() : await connectGitLab();
-    if (result?.message) onMessage?.(result.message);
-    refresh();
-  }, [refresh, onMessage]);
+    if (gitlabConnected) {
+      const result = await disconnectGitLab();
+      if (result?.message) onMessage?.(result.message);
+      refresh();
+    } else {
+      connectGitLab();
+    }
+  }, [gitlabConnected, refresh, onMessage]);
 
   return { githubConnected, githubUsername, gitlabConnected, toggleGitHub, toggleGitLab, refresh };
 }
