@@ -2,7 +2,7 @@
 Application entry point.
 
 Run locally with:
-    uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 Zero AWS dependencies: no boto3, no Cognito, no EC2, no DynamoDB. Identity is
 Google OAuth + local SQLite sessions. External calls go only to Google

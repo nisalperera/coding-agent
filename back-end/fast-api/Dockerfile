@@ -8,11 +8,13 @@ WORKDIR /code
 COPY ./requirements.txt /code/requirements.txt
 
 # Install dependencies
-RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+RUN pip install --no-cache-dir -r /code/requirements.txt
 
 # Copy the application code
 COPY ./app /code/app
+COPY ./main.py /code/main.py
+
+EXPOSE 8000
 
 # Run the FastAPI application using the official 'fastapi run' command
-CMD ["fastapi", "run", "app/main.py", "--port", "80"]
-    
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
