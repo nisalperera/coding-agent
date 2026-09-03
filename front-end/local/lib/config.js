@@ -1,0 +1,6 @@
+// front-end/local/lib/config.js
+export const APP_CONFIG = {
+  BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL,
+  GITHUB_OAUTH_CLIENT_ID: process.env.NEXT_PUBLIC_GITHUB_OAUTH_CLIENT_ID,
+  GITLAB_OAUTH_CLIENT_ID: process.env.NEXT_PUBLIC_GITLAB_OAUTH_CLIENT_ID,
+};
