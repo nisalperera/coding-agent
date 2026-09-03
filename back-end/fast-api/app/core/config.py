@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+
+from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -42,15 +44,21 @@ def _validate_http_url(name: str, value: str, *, allow_local_http: bool = False)
 
 
 class Settings:
+    APP_NAME: str = _optional("APP_NAME", "Coding Agent API")
     APP_ENV: str = _optional("APP_ENV", "development").lower()
     DEBUG: bool = _as_bool("DEBUG", False)
+    HTTP_TIMEOUT_S: float = float(_optional("HTTP_TIMEOUT_S", "30"))
 
     TAVILY_API_KEY: str = _require("TAVILY_API_KEY")
 
     GOOGLE_CLIENT_ID: str = _require("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET: str = _require("GOOGLE_CLIENT_SECRET")
     GOOGLE_REDIRECT_URI: str = _require("GOOGLE_REDIRECT_URI")
-    GOOGLE_ALLOWED_DOMAIN: str = _optional("GOOGLE_ALLOWED_DOMAIN")
+    GOOGLE_ALLOWED_EMAIL_DOMAIN: str = _optional(
+        "GOOGLE_ALLOWED_EMAIL_DOMAIN",
+        _optional("GOOGLE_ALLOWED_DOMAIN"),
+    )
+    GOOGLE_ALLOWED_DOMAIN: str = _optional("GOOGLE_ALLOWED_EMAIL_DOMAIN")
 
     SESSION_SECRET: str = _require("SESSION_SECRET")
     SESSION_COOKIE_NAME: str = _optional("SESSION_COOKIE_NAME", "session")
@@ -116,6 +124,10 @@ class Settings:
     )
     GITLAB_OAUTH_STATE_COOKIE_NAME: str = "gitlab_oauth_state"
 
+    SQLITE_DB_PATH: Path = Path(
+        _optional("SQLITE_DB_PATH", "data/coding_agent.db")
+    )
+
     @classmethod
     def validate(cls) -> None:
         if cls.DATABASE_POOL_SIZE < 1:
@@ -130,6 +142,8 @@ class Settings:
             raise RuntimeError("Session and OAuth state TTLs must be positive")
         if cls.INTEGRATION_OAUTH_STATE_TTL_S < 1:
             raise RuntimeError("INTEGRATION_OAUTH_STATE_TTL_S must be positive")
+        if cls.HTTP_TIMEOUT_S <= 0:
+            raise RuntimeError("HTTP_TIMEOUT_S must be positive")
 
         local_env = cls.APP_ENV in {"development", "test"}
         for name in (
