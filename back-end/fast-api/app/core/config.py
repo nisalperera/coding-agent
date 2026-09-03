@@ -58,7 +58,7 @@ class Settings:
         "GOOGLE_ALLOWED_EMAIL_DOMAIN",
         _optional("GOOGLE_ALLOWED_DOMAIN"),
     )
-    GOOGLE_ALLOWED_DOMAIN: str = _optional("GOOGLE_ALLOWED_EMAIL_DOMAIN")
+    GOOGLE_ALLOWED_DOMAIN: str = GOOGLE_ALLOWED_EMAIL_DOMAIN
 
     SESSION_SECRET: str = _require("SESSION_SECRET")
     SESSION_COOKIE_NAME: str = _optional("SESSION_COOKIE_NAME", "session")
