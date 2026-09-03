@@ -63,31 +63,31 @@ class Settings:
     SESSION_SECRET: str = _require("SESSION_SECRET")
     SESSION_COOKIE_NAME: str = _optional("SESSION_COOKIE_NAME", "session")
     SESSION_TTL_S: int = int(_optional("SESSION_TTL_S", "604800"))
+
     OAUTH_STATE_TTL_S: int = int(_optional("OAUTH_STATE_TTL_S", "600"))
+    OAUTH_STATE_COOKIE_SALT: str = _optional(
+        "OAUTH_STATE_COOKIE_SALT",
+        "google-oauth-state-v1",
+    )
+
     COOKIE_SECURE: bool = _as_bool("COOKIE_SECURE", False)
 
-    DATABASE_URL: str = _require("DATABASE_URL")
+    DATABASE_URL: str = _optional("DATABASE_URL")
     DATABASE_POOL_SIZE: int = int(_optional("DATABASE_POOL_SIZE", "5"))
     DATABASE_MAX_OVERFLOW: int = int(_optional("DATABASE_MAX_OVERFLOW", "10"))
     DATABASE_POOL_RECYCLE_S: int = int(_optional("DATABASE_POOL_RECYCLE_S", "1800"))
     DATABASE_CONNECT_TIMEOUT_S: int = int(_optional("DATABASE_CONNECT_TIMEOUT_S", "10"))
 
-    FRONTEND_ORIGIN: str = _validate_http_url(
-        "FRONTEND_ORIGIN",
-        _require("FRONTEND_ORIGIN"),
-        allow_local_http=APP_ENV in {"development", "test"},
-    )
-    CORS_ALLOW_ORIGINS: list[str] = [
-        _validate_http_url(
-            "CORS_ALLOW_ORIGINS",
-            origin.strip(),
-            allow_local_http=APP_ENV in {"development", "test"},
-        )
-        for origin in _optional("CORS_ALLOW_ORIGINS", FRONTEND_ORIGIN).split(",")
-        if origin.strip()
-    ]
+    FRONTEND_ORIGIN: str = _require("FRONTEND_ORIGIN")
 
-    INTEGRATION_TOKEN_ENCRYPTION_KEY: str = _require("INTEGRATION_TOKEN_ENCRYPTION_KEY")
+    CORS_ALLOW_ORIGINS_RAW: str = _optional(
+        "CORS_ALLOW_ORIGINS",
+        FRONTEND_ORIGIN,
+    )
+
+    CORS_ALLOW_ORIGINS: list[str] = []
+
+    INTEGRATION_TOKEN_ENCRYPTION_KEY: str = _optional("INTEGRATION_TOKEN_ENCRYPTION_KEY")
     INTEGRATIONS_ENABLED: bool = _as_bool("INTEGRATIONS_ENABLED", True)
     INTEGRATION_OAUTH_STATE_TTL_S: int = int(
         _optional("INTEGRATION_OAUTH_STATE_TTL_S", "600")
@@ -162,6 +162,38 @@ class Settings:
         ):
             _validate_http_url(name, getattr(cls, name), allow_local_http=local_env)
 
+    @classmethod
+    def require_database_configuration(cls) -> None:
+        if not cls.DATABASE_URL:
+            raise RuntimeError("Missing required environment variable: DATABASE_URL")
 
-Settings.validate()
+    @classmethod
+    def require_integration_encryption(cls) -> None:
+        if cls.INTEGRATIONS_ENABLED and not cls.INTEGRATION_TOKEN_ENCRYPTION_KEY:
+            raise RuntimeError(
+                "Missing required environment variable: "
+                "INTEGRATION_TOKEN_ENCRYPTION_KEY"
+            )
+
+
 settings = Settings()
+
+local_env = settings.APP_ENV in {"development", "test"}
+
+settings.FRONTEND_ORIGIN = _validate_http_url(
+    "FRONTEND_ORIGIN",
+    settings.FRONTEND_ORIGIN,
+    allow_local_http=local_env,
+)
+
+settings.CORS_ALLOW_ORIGINS = [
+    _validate_http_url(
+        "CORS_ALLOW_ORIGINS",
+        origin.strip(),
+        allow_local_http=local_env,
+    )
+    for origin in settings.CORS_ALLOW_ORIGINS_RAW.split(",")
+    if origin.strip()
+]
+
+settings.validate()
