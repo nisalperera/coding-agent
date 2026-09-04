@@ -35,6 +35,48 @@ issues via REST APIs).
 
 ---
 
+## Local deployment (this branch only)
+
+This branch (`feature/fastapi-mysql-oauth`) targets a self-hosted local/LAN deployment
+of the coding agent as an alternative to the AWS stack described above. It uses FastAPI
+(`back-end/fast-api/main.py`), MySQL with SQLAlchemy and Alembic, direct Google OpenID
+Connect with server-side sessions, and a local/LAN OpenAI-compatible vLLM server.
+
+| AWS component | Local equivalent (this branch) |
+|---|---|
+| Lambda (`back-end/lambda_function.py`) | FastAPI app (`back-end/fast-api/main.py`) |
+| Cognito + Google federation | Direct Google OpenID Connect (`app/auth`), server-side sessions |
+| DynamoDB `pending-actions` / `user-integrations` | MySQL via SQLAlchemy + Alembic (`app/db/models.py`, `app/db/sqlalchemy_database.py`) |
+| EC2 auto-start + vLLM | Local/LAN vLLM OpenAI-compatible server (`app/services/vllm_service.py`) |
+| Shared GitHub/GitLab PAT fallback | Per-user provider OAuth, with shared tokens available only behind `ALLOW_LEGACY_PROVIDER_TOKEN_FALLBACK` for local development |
+
+Schema changes are managed by Alembic under `back-end/fast-api/alembic/`, generated from
+the SQLAlchemy models in `app/db/models.py`. Run `alembic upgrade head` against a
+configured `DATABASE_URL` to create or upgrade the local MySQL schema; application
+startup never runs DDL itself.
+
+### Encrypting stored provider tokens
+
+`user_integrations.access_token_ciphertext` and `refresh_token_ciphertext` must never
+contain plaintext tokens. `app/core/crypto.py` encrypts and decrypts provider tokens
+with a Fernet key held in `INTEGRATION_TOKEN_ENCRYPTION_KEY`. Generate a key with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Set the generated value in the local FastAPI `.env`. The helper calls
+`Settings.require_integration_encryption()` before every encryption or decryption
+operation, so a missing key blocks token storage/retrieval rather than allowing a
+plaintext fallback. Rotate a key by decrypting existing values with the old key and
+re-encrypting them with the new key; this branch does not yet include an automated
+rotation utility.
+
+The AWS material elsewhere in this file remains the deployment reference for the AWS
+target. This section applies only to the local deployment architecture on this branch.
+
+---
+
 ## How per-user repo authorization actually gets used
 
 **GitHub** — Once a user clicks "Connect GitHub" (Step 11) and the OAuth exchange
