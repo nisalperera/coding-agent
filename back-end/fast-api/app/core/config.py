@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 
@@ -109,7 +110,7 @@ class Settings:
     GITLAB_OAUTH_CLIENT_ID: str = _optional("GITLAB_OAUTH_CLIENT_ID")
     GITLAB_OAUTH_CLIENT_SECRET: str = _optional("GITLAB_OAUTH_CLIENT_SECRET")
     GITLAB_OAUTH_REDIRECT_URI: str = _optional("GITLAB_OAUTH_REDIRECT_URI")
-    GITLAB_OAUTH_SCOPES: str = _optional("GITLAB_OAUTH_SCOPES", "read_user api")
+    GITLAB_OAUTH_SCOPES: str = _optional("GITLAB_OAUTH_SCOPES", "read_user")
     GITLAB_AUTHORIZE_URL: str = _optional(
         "GITLAB_AUTHORIZE_URL",
         "https://gitlab.com/oauth/authorize",
@@ -158,6 +159,8 @@ class Settings:
 
     @classmethod
     def validate(cls) -> None:
+        local_env = cls.APP_ENV in {"development", "test"}
+
         if cls.DATABASE_POOL_SIZE < 1:
             raise RuntimeError("DATABASE_POOL_SIZE must be at least 1")
         if cls.DATABASE_MAX_OVERFLOW < 0:
@@ -172,17 +175,22 @@ class Settings:
             raise RuntimeError("INTEGRATION_OAUTH_STATE_TTL_S must be positive")
         if cls.HTTP_TIMEOUT_S <= 0:
             raise RuntimeError("HTTP_TIMEOUT_S must be positive")
-
-        local_env = cls.APP_ENV in {"development", "test"}
+        if not local_env and not cls.COOKIE_SECURE:
+            raise RuntimeError("COOKIE_SECURE must be true outside development and test")
+        
         for name in (
             "GOOGLE_DISCOVERY_URL",
-            "GITHUB_API",
-            "GITLAB_API",
-            "VLLM_ENDPOINT",
-            "VLLM_HEALTH_ENDPOINT",
+            "GOOGLE_REDIRECT_URI",
+            "GITHUB_AUTHORIZE_URL",
+            "GITHUB_TOKEN_URL",
+            "GITHUB_USER_URL",
+            "GITHUB_OAUTH_REDIRECT_URI",
             "GITLAB_AUTHORIZE_URL",
             "GITLAB_TOKEN_URL",
             "GITLAB_USER_URL",
+            "GITLAB_OAUTH_REDIRECT_URI",
+            "VLLM_ENDPOINT",
+            "VLLM_HEALTH_ENDPOINT",
         ):
             value = getattr(cls, name)
             if value:
@@ -197,16 +205,31 @@ class Settings:
 
     @classmethod
     def require_database_configuration(cls) -> None:
-        if not cls.DATABASE_URL:
-            raise RuntimeError("Missing required environment variable: DATABASE_URL")
+        if cls.DATABASE_URL:
+            parsed = urlparse(cls.DATABASE_URL)
+            if parsed.scheme != "mysql+pymysql":
+                raise RuntimeError(
+                    "DATABASE_URL must use the mysql+pymysql SQLAlchemy dialect"
+                )
 
+    
     @classmethod
     def require_integration_encryption(cls) -> None:
-        if cls.INTEGRATIONS_ENABLED and not cls.INTEGRATION_TOKEN_ENCRYPTION_KEY:
+        if not cls.INTEGRATIONS_ENABLED:
+            return
+
+        if not cls.INTEGRATION_TOKEN_ENCRYPTION_KEY:
             raise RuntimeError(
                 "Missing required environment variable: "
                 "INTEGRATION_TOKEN_ENCRYPTION_KEY"
             )
+
+        try:
+            Fernet(cls.INTEGRATION_TOKEN_ENCRYPTION_KEY.encode("utf-8"))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "INTEGRATION_TOKEN_ENCRYPTION_KEY must be a valid Fernet key"
+            ) from exc
 
 
 settings = Settings()
