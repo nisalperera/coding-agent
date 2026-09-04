@@ -1,6 +1,11 @@
 """
 Human-in-the-loop approval workflow for risky tool calls (write_file,
 run_shell, github_*, gitlab_*), backed by SQLite instead of DynamoDB.
+
+The `gitlab_token` passthrough has been removed: call_tool() now always
+resolves provider credentials itself from the encrypted integration store
+(see app/tools/dispatch.py), so no raw provider token ever needs to travel
+through the pending-action approval payload.
 """
 import asyncio
 import logging
@@ -37,7 +42,7 @@ async def handle_pending_action(body: ActionRequest, user_id: str, trace_id: str
 
     try:
         if body.decision == "approve":
-            result = await call_tool(item["tool_name"], item["args"], user_id, gitlab_token=body.gitlab_token)
+            result = await call_tool(item["tool_name"], item["args"], user_id)
         else:
             result = "User denied this action."
     finally:

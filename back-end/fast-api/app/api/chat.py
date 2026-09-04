@@ -7,6 +7,12 @@ Wire format on the same stream:
   1. NDJSON lines for backend-readiness/progress/error/confirmation events.
   2. SSE frames ("data: {...}\n\n") for model tokens once generation starts,
      terminated by "data: [DONE]\n\n".
+
+Change from the previous version: `body.gitlab_token` is no longer read or
+passed to call_tool(). GitLab credentials are now resolved server-side from
+the encrypted integration store, the same way GitHub credentials already
+are (see app/tools/dispatch.py). If your ChatRequest schema still declares a
+`gitlab_token` field, it is safe to remove it once no caller supplies it.
 """
 import json
 import logging
@@ -28,6 +34,7 @@ from app.services.vllm_service import call_vllm, vllm_token_stream
 from app.tools.dispatch import FUNCS, call_tool
 from app.tools.repo_tools import REPO_RISKY_TOOLS, REPO_TOOL_DEFINITIONS
 from app.tools.web_search import WEB_SEARCH_TOOL_DEFINITION
+
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
@@ -98,7 +105,7 @@ async def chat_completions(body: ChatRequest, request: Request, user: dict[str, 
                     return
 
                 try:
-                    tool_result = await call_tool(name, args, user_id, gitlab_token=body.gitlab_token)
+                    tool_result = await call_tool(name, args, user_id)
                 except Exception as exc:
                     log_event(logging.ERROR, "tool_execution_failed", tool=name, error=str(exc), trace_id=trace_id)
                     tool_result = f"Tool execution failed: {exc}"
