@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.db.models import User
-from app.db.sqlalchemy_database import db_session
+from app.db.database import db_session
 
 
 def upsert_google_user(claims: dict[str, Any]) -> dict[str, Any]:

@@ -9,7 +9,7 @@ from typing import Optional
 from sqlalchemy import delete, select
 
 from app.db.models import OAuthState
-from app.db.sqlalchemy_database import db_session
+from app.db.database import db_session
 
 
 def save_oauth_state(state: str, code_verifier: str, cookie_nonce: str, ttl_seconds: int) -> None:

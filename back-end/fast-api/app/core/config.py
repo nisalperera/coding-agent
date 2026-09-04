@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
@@ -140,8 +139,6 @@ class Settings:
         "https://gitlab.com/api/v4/user",
     )
     GITLAB_OAUTH_STATE_COOKIE_NAME: str = "gitlab_oauth_state"
-
-    SQLITE_DB_PATH: Path = Path(_optional("SQLITE_DB_PATH", "data/coding_agent.db"))
 
     GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
     OAUTH_STATE_COOKIE_NAME = "google_oauth_state"

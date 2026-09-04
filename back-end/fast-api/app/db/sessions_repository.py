@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.db.models import SessionRecord, User
-from app.db.sqlalchemy_database import db_session
+from app.db.database import db_session
 
 
 def hash_session_token(token: str) -> str:

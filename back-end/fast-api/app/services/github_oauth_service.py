@@ -14,7 +14,7 @@ from app.db.integrations_repository import (
     IntegrationNotFoundError,
     integrations_repository,
 )
-from app.db.sqlalchemy_database import db_session
+from app.db.database import db_session
 
 
 class GitHubOAuthError(Exception):
