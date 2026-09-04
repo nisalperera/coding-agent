@@ -6,15 +6,15 @@ import asyncio
 from typing import Any
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.crypto import TokenEncryptionError
 from app.core.config import settings
+from app.core.crypto import TokenEncryptionError
 from app.db.integrations_repository import (
     IntegrationNotFoundError,
     integrations_repository,
 )
 from app.db.sqlalchemy_database import db_session
-from sqlalchemy.exc import SQLAlchemyError
 
 
 class GitHubOAuthError(Exception):
