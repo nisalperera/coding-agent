@@ -12,6 +12,7 @@ CONFIG_MODULE = "app.core.config"
 
 def _base_env() -> dict[str, str]:
     return {
+        "SKIP_DOTENV": "true",
         "APP_ENV": "development",
         "DEBUG": "false",
         "TAVILY_API_KEY": "test-tavily-key",
@@ -31,8 +32,20 @@ def _base_env() -> dict[str, str]:
         "GITLAB_OAUTH_CLIENT_ID": "test-gitlab-client-id",
         "GITLAB_OAUTH_CLIENT_SECRET": "test-gitlab-secret",
         "GITLAB_OAUTH_REDIRECT_URI": "http://localhost:8000/v1/auth/gitlab/callback",
+        "GITLAB_OAUTH_SCOPES": "read_user",
+        "GITLAB_REPOSITORY_WRITE_ENABLED": "false"
     }
 
+def _production_env() -> dict[str, str]:
+    return {
+        "APP_ENV": "production",
+        "COOKIE_SECURE": "true",
+        "FRONTEND_ORIGIN": "https://coding.nisalperera.com",
+        "CORS_ALLOW_ORIGINS": "https://coding.nisalperera.com",
+        "GOOGLE_REDIRECT_URI": "https://api.nisalperera.com/v1/auth/google/callback",
+        "GITHUB_OAUTH_REDIRECT_URI": "https://api.nisalperera.com/v1/auth/github/callback",
+        "GITLAB_OAUTH_REDIRECT_URI": "https://api.nisalperera.com/v1/auth/gitlab/callback",
+    }
 
 @pytest.fixture(autouse=True)
 def isolated_config_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
@@ -100,10 +113,10 @@ def test_markdown_formatted_cors_origin_is_rejected(monkeypatch: pytest.MonkeyPa
 @pytest.mark.parametrize(
     ("name", "value"),
     [
-        ("FRONTEND_ORIGIN", "http://example.com"),
-        ("GOOGLE_REDIRECT_URI", "http://example.com/v1/auth/google/callback"),
-        ("GITHUB_OAUTH_REDIRECT_URI", "http://example.com/v1/auth/github/callback"),
-        ("GITLAB_OAUTH_REDIRECT_URI", "http://example.com/v1/auth/gitlab/callback"),
+        ("FRONTEND_ORIGIN", "http://view.nisalperera.com"),
+        ("GOOGLE_REDIRECT_URI", "http://api.nisalperera.com/v1/auth/google/callback"),
+        ("GITHUB_OAUTH_REDIRECT_URI", "http://api.nisalperera.com/v1/auth/github/callback"),
+        ("GITLAB_OAUTH_REDIRECT_URI", "http://api.nisalperera.com/v1/auth/gitlab/callback"),
     ],
 )
 def test_production_http_callback_and_frontend_urls_are_rejected(
@@ -111,25 +124,25 @@ def test_production_http_callback_and_frontend_urls_are_rejected(
     name: str,
     value: str,
 ) -> None:
+
+    environment = _production_env()
+    environment[name] = value
+
     _assert_config_error(
         monkeypatch,
         f"{name} must use HTTPS outside local development",
-        APP_ENV="production",
-        COOKIE_SECURE="true",
-        **{name: value},
+        **environment
     )
 
 
 def test_production_rejects_insecure_cookie_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    environment = _production_env()
+    environment["COOKIE_SECURE"] = "false"
+
     _assert_config_error(
         monkeypatch,
         "COOKIE_SECURE must be true outside development and test",
-        APP_ENV="production",
-        COOKIE_SECURE="false",
-        FRONTEND_ORIGIN="https://app.example.com",
-        GOOGLE_REDIRECT_URI="https://api.example.com/v1/auth/google/callback",
-        GITHUB_OAUTH_REDIRECT_URI="https://api.example.com/v1/auth/github/callback",
-        GITLAB_OAUTH_REDIRECT_URI="https://api.example.com/v1/auth/gitlab/callback",
+        **environment
     )
 
 
@@ -169,7 +182,7 @@ def test_missing_fernet_key_is_rejected_when_integrations_are_enabled(
     )
 
 
-def test_invalid_fernet_key_is_rejected(monkeypatch: pytest.Monkey_Patch) -> None:
+def test_invalid_fernet_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     _assert_config_error(
         monkeypatch,
         "INTEGRATION_TOKEN_ENCRYPTION_KEY must be a valid Fernet key",

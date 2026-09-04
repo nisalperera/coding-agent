@@ -220,11 +220,10 @@ async def test_dispatch_requires_connected_github(
     )
 
     result = await dispatch.call_repo_tool(
-        "github_list_repositories",
-        {},
-        "00000000-0000-0000-0000-000000000106",
-        None,
-    )
+    "github_list_repositories",
+    {},
+    "00000000-0000-0000-0000-000000000106",
+)
 
     assert result == {
         "error": "github_integration_required",
@@ -266,7 +265,6 @@ async def test_dispatch_passes_token_only_to_internal_tool(
         "github_list_repositories",
         {"owner": "octocat"},
         "00000000-0000-0000-0000-000000000107",
-        None,
     )
 
     assert result == {"ok": True}

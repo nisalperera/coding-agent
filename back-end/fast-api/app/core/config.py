@@ -7,8 +7,6 @@ from urllib.parse import urlparse
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
-load_dotenv()
-
 
 def _require(name: str) -> str:
     value = os.environ.get(name, "").strip()
@@ -28,6 +26,10 @@ def _as_bool(name: str, default: bool = False) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     raise RuntimeError(f"Invalid boolean environment variable: {name}")
+
+
+if not _as_bool("SKIP_DOTENV", False):
+    load_dotenv(override=False)
 
 
 def _validate_http_url(name: str, value: str, *, allow_local_http: bool = False) -> str:
