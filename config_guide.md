@@ -72,6 +72,9 @@ plaintext fallback. Rotate a key by decrypting existing values with the old key 
 re-encrypting them with the new key; this branch does not yet include an automated
 rotation utility.
 
+NOTE: Do not commit this key. Use a separate key per environment and keep it stable for as
+long as ciphertext encrypted with it must remain readable.
+
 The AWS material elsewhere in this file remains the deployment reference for the AWS
 target. This section applies only to the local deployment architecture on this branch.
 
