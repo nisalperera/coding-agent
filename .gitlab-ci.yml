@@ -17,6 +17,23 @@ test:
     - flake8 lambda_function.py cli_agent.py cli_auth.py repo_tools.py --max-line-length=120 --extend-ignore=E203
     - if [ -d tests ]; then pytest tests/ -v; else echo "No tests directory found, skipping"; fi
 
+fastapi-test:
+  stage: test
+  image: python:3.12-slim
+  rules:
+    - changes:
+        - back-end/fast-api/**
+        - .github/workflows/fastapi-tests.yml
+        - .gitlab-ci.yml
+  before_script:
+    - cd back-end/fast-api
+    - python -m pip install --upgrade pip
+    - python -m pip install -r requirements.txt
+    - python -m pip install -r requirements-dev.txt
+  script:
+    - export INTEGRATION_TOKEN_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+    - python -m pytest -q tests
+
 deploy:
   stage: deploy
   image: python:3.12-slim
