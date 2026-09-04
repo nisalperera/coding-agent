@@ -1,35 +1,40 @@
+"""Short-lived Google OAuth / PKCE transaction state (SQLAlchemy/MySQL).
+
+cookie_nonce proves the callback belongs to the same browser that started the flow.
 """
-Short-lived Google OAuth / PKCE transaction state. cookie_nonce proves the
-callback belongs to the same browser that started the flow.
-"""
+import secrets
 import time
 from typing import Optional
 
-from app.db.database import db_connection
+from sqlalchemy import delete, select
+
+from app.db.models import OAuthState
+from app.db.sqlalchemy_database import db_session
 
 
 def save_oauth_state(state: str, code_verifier: str, cookie_nonce: str, ttl_seconds: int) -> None:
     now = int(time.time())
-    with db_connection() as connection:
-        connection.execute("DELETE FROM oauth_states WHERE expires_at <= ?", (now,))
-        connection.execute(
-            "INSERT INTO oauth_states (state, code_verifier, cookie_nonce, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
-            (state, code_verifier, cookie_nonce, now + ttl_seconds, now),
+    with db_session() as session:
+        session.execute(delete(OAuthState).where(OAuthState.expires_at <= now))
+        session.add(
+            OAuthState(
+                state=state,
+                code_verifier=code_verifier,
+                cookie_nonce=cookie_nonce,
+                expires_at=now + ttl_seconds,
+                created_at=now,
+            )
         )
 
 
 def consume_oauth_state(state: str, cookie_nonce: str) -> Optional[str]:
-    import secrets as _secrets
-
     now = int(time.time())
-    with db_connection() as connection:
-        row = connection.execute(
-            "SELECT code_verifier, cookie_nonce, expires_at FROM oauth_states WHERE state = ?", (state,)
-        ).fetchone()
-        connection.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+    with db_session() as session:
+        row = session.scalar(select(OAuthState).where(OAuthState.state == state))
+        session.execute(delete(OAuthState).where(OAuthState.state == state))
 
-    if not row or row["expires_at"] <= now:
-        return None
-    if not _secrets.compare_digest(row["cookie_nonce"], cookie_nonce):
-        return None
-    return row["code_verifier"]
+        if row is None or row.expires_at <= now:
+            return None
+        if not secrets.compare_digest(row.cookie_nonce, cookie_nonce):
+            return None
+        return row.code_verifier
