@@ -31,7 +31,7 @@ async def _handle_github_callback(request: Request, body: ActionRequest, user_id
 
 async def _handle_disconnect_integration(body: ActionRequest, user_id: str, trace_id: str) -> dict[str, Any]:
     if body.provider == "github":
-        await asyncio.to_thread(delete_user_integration, user_id, "github")
+        await delete_user_integration(user_id, "github")
         log_event(logging.INFO, "integration_disconnected", user_id=user_id, provider="github", trace_id=trace_id)
         return {"disconnected": True, "provider": "github"}
     return {"disconnected": True, "provider": body.provider, "server_side": False}
