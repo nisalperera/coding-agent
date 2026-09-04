@@ -154,7 +154,7 @@ def test_missing_database_url_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
 
-def test_sqlite_database_url_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rejects_sqlite_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     _assert_config_error(
         monkeypatch,
         "DATABASE_URL must use the mysql\\+pymysql SQLAlchemy dialect",

@@ -17,16 +17,21 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import actions, auth, chat, health, integration
 from app.core.config import settings
-from app.db.database import initialise_database
+from app.db.database import assert_database_ready, dispose_database_engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    initialise_database()
+    assert_database_ready()
+
     app.state.http_client = httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT_S)
     app.state.google_discovery = None
-    yield
-    await app.state.http_client.aclose()
+
+    try:
+        yield
+    finally:
+        await app.state.http_client.aclose()
+        dispose_database_engine()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
