@@ -10,7 +10,7 @@ import uuid
 from typing import Any, Optional
 
 from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.mysql import JSON as MySQLJSON
+from sqlalchemy.dialects.mysql import JSON as MySQLJSON, BIGINT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -47,8 +47,8 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     picture: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    updated_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
     sessions: Mapped[list["SessionRecord"]] = relationship(
         back_populates="user",
@@ -82,8 +82,8 @@ class OAuthState(Base):
     state: Mapped[str] = mapped_column(String(255), primary_key=True)
     code_verifier: Mapped[str] = mapped_column(String(255), nullable=False)
     cookie_nonce: Mapped[str] = mapped_column(String(255), nullable=False)
-    expires_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
 
 class SessionRecord(Base):
@@ -103,9 +103,9 @@ class SessionRecord(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
-    expires_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    last_seen_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    last_seen_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="sessions")
 
@@ -122,10 +122,10 @@ class UserIntegration(Base):
     provider: Mapped[str] = mapped_column(String(PROVIDER_LENGTH), primary_key=True)
     access_token_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
     refresh_token_ciphertext: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    token_expires_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    token_expires_at: Mapped[Optional[BIGINT]] = mapped_column(BIGINT, nullable=True)
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    connected_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    connected_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    updated_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="integrations")
 
@@ -150,8 +150,8 @@ class PendingAction(Base):
     )
     tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
     args: Mapped[dict[str, Any]] = mapped_column("args_json", MySQLJSON, nullable=False)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    expires_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="pending_actions")
 
@@ -174,7 +174,7 @@ class IntegrationOAuthState(Base):
     )
     provider: Mapped[str] = mapped_column(String(PROVIDER_LENGTH), nullable=False)
     code_verifier: Mapped[str] = mapped_column(String(255), nullable=False)
-    expires_at: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="integration_oauth_states")
