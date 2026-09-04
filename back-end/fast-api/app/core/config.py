@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import os
-
 from pathlib import Path
 from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
-
 
 load_dotenv()
 
@@ -42,6 +40,23 @@ def _validate_http_url(name: str, value: str, *, allow_local_http: bool = False)
     if parsed.scheme != "https" and not (allow_local_http and is_local):
         raise RuntimeError(f"{name} must use HTTPS outside local development")
     return value.rstrip("/")
+
+
+def _parse_gitlab_scopes(value: str) -> tuple[str, ...]:
+    scopes = tuple(scope for scope in value.replace(",", " ").split() if scope)
+    if not scopes:
+        raise RuntimeError("GITLAB_OAUTH_SCOPES must include at least one scope")
+    if len(set(scopes)) != len(scopes):
+        raise RuntimeError("GITLAB_OAUTH_SCOPES must not contain duplicate scopes")
+
+    allowed_scopes = {"read_user", "api"}
+    unsupported_scopes = set(scopes) - allowed_scopes
+    if unsupported_scopes:
+        raise RuntimeError(
+            "GITLAB_OAUTH_SCOPES contains unsupported scope(s): "
+            + ", ".join(sorted(unsupported_scopes))
+        )
+    return scopes
 
 
 class Settings:
@@ -80,12 +95,7 @@ class Settings:
     DATABASE_CONNECT_TIMEOUT_S: int = int(_optional("DATABASE_CONNECT_TIMEOUT_S", "10"))
 
     FRONTEND_ORIGIN: str = _require("FRONTEND_ORIGIN")
-
-    CORS_ALLOW_ORIGINS_RAW: str = _optional(
-        "CORS_ALLOW_ORIGINS",
-        FRONTEND_ORIGIN,
-    )
-
+    CORS_ALLOW_ORIGINS_RAW: str = _optional("CORS_ALLOW_ORIGINS", FRONTEND_ORIGIN)
     CORS_ALLOW_ORIGINS: list[str] = []
 
     INTEGRATION_TOKEN_ENCRYPTION_KEY: str = _optional("INTEGRATION_TOKEN_ENCRYPTION_KEY")
@@ -111,6 +121,10 @@ class Settings:
     GITLAB_OAUTH_CLIENT_SECRET: str = _optional("GITLAB_OAUTH_CLIENT_SECRET")
     GITLAB_OAUTH_REDIRECT_URI: str = _optional("GITLAB_OAUTH_REDIRECT_URI")
     GITLAB_OAUTH_SCOPES: str = _optional("GITLAB_OAUTH_SCOPES", "read_user")
+    GITLAB_REPOSITORY_WRITE_ENABLED: bool = _as_bool(
+        "GITLAB_REPOSITORY_WRITE_ENABLED",
+        False,
+    )
     GITLAB_AUTHORIZE_URL: str = _optional(
         "GITLAB_AUTHORIZE_URL",
         "https://gitlab.com/oauth/authorize",
@@ -125,15 +139,11 @@ class Settings:
     )
     GITLAB_OAUTH_STATE_COOKIE_NAME: str = "gitlab_oauth_state"
 
-    SQLITE_DB_PATH: Path = Path(
-        _optional("SQLITE_DB_PATH", "data/coding_agent.db")
-    )
+    SQLITE_DB_PATH: Path = Path(_optional("SQLITE_DB_PATH", "data/coding_agent.db"))
 
-    # Google OpenID Connect
     GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
     OAUTH_STATE_COOKIE_NAME = "google_oauth_state"
 
-    # vLLM
     VLLM_ENDPOINT = "http://127.0.0.1:8001/v1/chat/completions"
     VLLM_HEALTH_ENDPOINT = "http://127.0.0.1:8001/health"
     MODEL_NAME = "local-model"
@@ -141,15 +151,12 @@ class Settings:
     POLL_INTERVAL_S = 2.0
     RETRY_AFTER_S = 60
 
-    # In-memory rate limiter
     RATE_LIMIT_MAX_REQUESTS = 60
     RATE_LIMIT_WINDOW_S = 60
 
-    # Legacy repository API compatibility
     GITHUB_API = "https://api.github.com"
     GITLAB_API = "https://gitlab.com/api/v4"
 
-    # Explicitly gated development-only legacy fallback
     ALLOW_LEGACY_PROVIDER_TOKEN_FALLBACK: bool = _as_bool(
         "ALLOW_LEGACY_PROVIDER_TOKEN_FALLBACK",
         False,
@@ -177,7 +184,15 @@ class Settings:
             raise RuntimeError("HTTP_TIMEOUT_S must be positive")
         if not local_env and not cls.COOKIE_SECURE:
             raise RuntimeError("COOKIE_SECURE must be true outside development and test")
-        
+
+        gitlab_scopes = _parse_gitlab_scopes(cls.GITLAB_OAUTH_SCOPES)
+        if "api" in gitlab_scopes and not cls.GITLAB_REPOSITORY_WRITE_ENABLED:
+            raise RuntimeError(
+                "GITLAB_OAUTH_SCOPES may include api only when "
+                "GITLAB_REPOSITORY_WRITE_ENABLED is true"
+            )
+        cls.GITLAB_OAUTH_SCOPES = " ".join(gitlab_scopes)
+
         for name in (
             "GOOGLE_DISCOVERY_URL",
             "GOOGLE_REDIRECT_URI",
@@ -196,23 +211,17 @@ class Settings:
             if value:
                 _validate_http_url(name, value, allow_local_http=local_env)
 
-        for name in (
-            "GITLAB_AUTHORIZE_URL",
-            "GITLAB_TOKEN_URL",
-            "GITLAB_USER_URL",
-        ):
-            _validate_http_url(name, getattr(cls, name), allow_local_http=local_env)
-
     @classmethod
     def require_database_configuration(cls) -> None:
-        if cls.DATABASE_URL:
-            parsed = urlparse(cls.DATABASE_URL)
-            if parsed.scheme != "mysql+pymysql":
-                raise RuntimeError(
-                    "DATABASE_URL must use the mysql+pymysql SQLAlchemy dialect"
-                )
+        if not cls.DATABASE_URL:
+            raise RuntimeError("Missing required environment variable: DATABASE_URL")
 
-    
+        parsed = urlparse(cls.DATABASE_URL)
+        if parsed.scheme != "mysql+pymysql":
+            raise RuntimeError(
+                "DATABASE_URL must use the mysql+pymysql SQLAlchemy dialect"
+            )
+
     @classmethod
     def require_integration_encryption(cls) -> None:
         if not cls.INTEGRATIONS_ENABLED:
@@ -253,3 +262,5 @@ settings.CORS_ALLOW_ORIGINS = [
 ]
 
 settings.validate()
+settings.require_database_configuration()
+settings.require_integration_encryption()

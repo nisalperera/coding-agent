@@ -7,7 +7,6 @@ from collections.abc import Iterator
 import pytest
 from cryptography.fernet import Fernet
 
-
 CONFIG_MODULE = "app.core.config"
 
 
@@ -43,6 +42,7 @@ def isolated_config_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[Non
 
     for name in _base_env():
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("GITLAB_REPOSITORY_WRITE_ENABLED", raising=False)
 
     yield
 
@@ -66,7 +66,11 @@ def _load_settings(monkeypatch: pytest.MonkeyPatch, **overrides: str | None):
     return module.settings
 
 
-def _assert_config_error(monkeypatch: pytest.MonkeyPatch, message: str, **overrides: str | None) -> None:
+def _assert_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    **overrides: str | None,
+) -> None:
     with pytest.raises(RuntimeError, match=message):
         _load_settings(monkeypatch, **overrides)
 
@@ -85,8 +89,11 @@ def test_development_localhost_configuration_loads(monkeypatch: pytest.MonkeyPat
 def test_markdown_formatted_cors_origin_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     _assert_config_error(
         monkeypatch,
-        "CORS_ALLOW_ORIGINS must be an absolute HTTP\(S\) URL",
-        CORS_ALLOW_ORIGINS="http://localhost:3000,[http://127.0.0.1:3000](http://127.0.0.1:3000)",
+        "CORS_ALLOW_ORIGINS must be an absolute HTTP\\(S\\) URL",
+        CORS_ALLOW_ORIGINS=(
+            "http://localhost:3000,"
+            "[http://127.0.0.1:3000](http://127.0.0.1:3000)"
+        ),
     )
 
 
@@ -126,10 +133,18 @@ def test_production_rejects_insecure_cookie_configuration(monkeypatch: pytest.Mo
     )
 
 
+def test_missing_database_url_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _assert_config_error(
+        monkeypatch,
+        "Missing required environment variable: DATABASE_URL",
+        DATABASE_URL=None,
+    )
+
+
 def test_sqlite_database_url_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     _assert_config_error(
         monkeypatch,
-        "DATABASE_URL must use the mysql\+pymysql SQLAlchemy dialect",
+        "DATABASE_URL must use the mysql\\+pymysql SQLAlchemy dialect",
         DATABASE_URL="sqlite:///data/coding_agent.db",
     )
 
@@ -154,7 +169,7 @@ def test_missing_fernet_key_is_rejected_when_integrations_are_enabled(
     )
 
 
-def test_invalid_fernet_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_invalid_fernet_key_is_rejected(monkeypatch: pytest.Monkey_Patch) -> None:
     _assert_config_error(
         monkeypatch,
         "INTEGRATION_TOKEN_ENCRYPTION_KEY must be a valid Fernet key",
@@ -181,7 +196,8 @@ def test_gitlab_api_scope_requires_explicit_repository_write_enablement(
 ) -> None:
     _assert_config_error(
         monkeypatch,
-        "GITLAB_OAUTH_SCOPES may include api only when GITLAB_REPOSITORY_WRITE_ENABLED is true",
+        "GITLAB_OAUTH_SCOPES may include api only when "
+        "GITLAB_REPOSITORY_WRITE_ENABLED is true",
         GITLAB_OAUTH_SCOPES="read_user api",
         GITLAB_REPOSITORY_WRITE_ENABLED="false",
     )
@@ -197,3 +213,29 @@ def test_gitlab_api_scope_is_accepted_when_repository_writes_are_enabled(
     )
 
     assert settings.GITLAB_OAUTH_SCOPES == "read_user api"
+
+
+def test_gitlab_scope_csv_is_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _load_settings(
+        monkeypatch,
+        GITLAB_OAUTH_SCOPES="read_user,api",
+        GITLAB_REPOSITORY_WRITE_ENABLED="true",
+    )
+
+    assert settings.GITLAB_OAUTH_SCOPES == "read_user api"
+
+
+def test_gitlab_duplicate_scope_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _assert_config_error(
+        monkeypatch,
+        "GITLAB_OAUTH_SCOPES must not contain duplicate scopes",
+        GITLAB_OAUTH_SCOPES="read_user read_user",
+    )
+
+
+def test_gitlab_unsupported_scope_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _assert_config_error(
+        monkeypatch,
+        "GITLAB_OAUTH_SCOPES contains unsupported scope\\(s\\): sudo",
+        GITLAB_OAUTH_SCOPES="read_user sudo",
+    )
