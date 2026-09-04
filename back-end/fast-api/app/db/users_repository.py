@@ -1,12 +1,15 @@
-"""Data-access functions for the `users` table."""
+"""Data-access functions for the `users` table (SQLAlchemy/MySQL)."""
 import time
 import uuid
 from typing import Any, Optional
 
 from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
-from app.db.database import db_connection
+from app.db.models import User
+from app.db.sqlalchemy_database import db_session
 
 
 def upsert_google_user(claims: dict[str, Any]) -> dict[str, Any]:
@@ -22,23 +25,62 @@ def upsert_google_user(claims: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="This Google Workspace domain is not allowed")
 
     now = int(time.time())
-    with db_connection() as connection:
-        existing = connection.execute("SELECT user_id FROM users WHERE google_sub = ?", (google_sub,)).fetchone()
-        user_id = existing["user_id"] if existing else str(uuid.uuid4())
-        connection.execute(
-            """
-            INSERT INTO users (user_id, google_sub, email, email_verified, name, picture, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(google_sub) DO UPDATE SET
-                email = excluded.email, email_verified = excluded.email_verified,
-                name = excluded.name, picture = excluded.picture, updated_at = excluded.updated_at
-            """,
-            (user_id, google_sub, email, int(email_verified), claims.get("name"), claims.get("picture"), now, now),
-        )
-    return {"user_id": user_id, "email": email, "name": claims.get("name"), "picture": claims.get("picture")}
+    name = claims.get("name")
+    picture = claims.get("picture")
+
+    with db_session() as session:
+        user = session.scalar(select(User).where(User.google_sub == google_sub))
+        if user is None:
+            user = User(
+                user_id=str(uuid.uuid4()),
+                google_sub=google_sub,
+                email=email,
+                email_verified=email_verified,
+                name=name,
+                picture=picture,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(user)
+            try:
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                user = session.scalar(select(User).where(User.google_sub == google_sub))
+                if user is None:
+                    raise
+                _apply_google_claims(user, email, email_verified, name, picture, now)
+        else:
+            _apply_google_claims(user, email, email_verified, name, picture, now)
+
+        user_id = user.user_id
+
+    return {"user_id": user_id, "email": email, "name": name, "picture": picture}
+
+
+def _apply_google_claims(
+    user: User,
+    email: str,
+    email_verified: bool,
+    name: Optional[str],
+    picture: Optional[str],
+    now: int,
+) -> None:
+    user.email = email
+    user.email_verified = email_verified
+    user.name = name
+    user.picture = picture
+    user.updated_at = now
 
 
 def get_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
-    with db_connection() as connection:
-        row = connection.execute("SELECT user_id, email, name, picture FROM users WHERE user_id = ?", (user_id,)).fetchone()
-    return dict(row) if row else None
+    with db_session() as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return None
+        return {
+            "user_id": user.user_id,
+            "email": user.email,
+            "name": user.name,
+            "picture": user.picture,
+        }

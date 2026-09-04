@@ -1,11 +1,14 @@
-"""Sessions table access. Only a SHA-256 hash of the session token is stored."""
+"""Sessions table access (SQLAlchemy/MySQL). Only a SHA-256 hash of the session token is stored."""
 import hashlib
 import secrets
 import time
 from typing import Any, Optional
 
+from sqlalchemy import delete, select
+
 from app.core.config import settings
-from app.db.database import db_connection
+from app.db.models import SessionRecord, User
+from app.db.sqlalchemy_database import db_session
 
 
 def hash_session_token(token: str) -> str:
@@ -15,10 +18,15 @@ def hash_session_token(token: str) -> str:
 def create_session(user_id: str) -> str:
     now = int(time.time())
     token = secrets.token_urlsafe(48)
-    with db_connection() as connection:
-        connection.execute(
-            "INSERT INTO sessions (token_hash, user_id, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
-            (hash_session_token(token), user_id, now + settings.SESSION_TTL_S, now, now),
+    with db_session() as session:
+        session.add(
+            SessionRecord(
+                token_hash=hash_session_token(token),
+                user_id=user_id,
+                expires_at=now + settings.SESSION_TTL_S,
+                created_at=now,
+                last_seen_at=now,
+            )
         )
     return token
 
@@ -26,27 +34,37 @@ def create_session(user_id: str) -> str:
 def get_session_user(token: str) -> Optional[dict[str, Any]]:
     now = int(time.time())
     token_hash = hash_session_token(token)
-    with db_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT u.user_id, u.google_sub, u.email, u.email_verified, u.name, u.picture
-            FROM sessions AS s JOIN users AS u ON u.user_id = s.user_id
-            WHERE s.token_hash = ? AND s.expires_at > ?
-            """,
-            (token_hash, now),
-        ).fetchone()
-        if row:
-            connection.execute("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?", (now, token_hash))
-    return dict(row) if row else None
+    with db_session() as session:
+        row = session.execute(
+            select(User, SessionRecord)
+            .join(SessionRecord, SessionRecord.user_id == User.user_id)
+            .where(SessionRecord.token_hash == token_hash, SessionRecord.expires_at > now)
+        ).first()
+        if row is None:
+            return None
+
+        user, session_record = row
+        session_record.last_seen_at = now
+
+        return {
+            "user_id": user.user_id,
+            "google_sub": user.google_sub,
+            "email": user.email,
+            "email_verified": user.email_verified,
+            "name": user.name,
+            "picture": user.picture,
+        }
 
 
 def delete_session(token: str) -> None:
-    with db_connection() as connection:
-        connection.execute("DELETE FROM sessions WHERE token_hash = ?", (hash_session_token(token),))
+    with db_session() as session:
+        session.execute(
+            delete(SessionRecord).where(SessionRecord.token_hash == hash_session_token(token))
+        )
 
 
 def purge_expired_sessions() -> int:
     now = int(time.time())
-    with db_connection() as connection:
-        cursor = connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
-        return cursor.rowcount
+    with db_session() as session:
+        result = session.execute(delete(SessionRecord).where(SessionRecord.expires_at <= now))
+        return result.rowcount or 0
