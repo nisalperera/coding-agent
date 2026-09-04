@@ -216,4 +216,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-back-end/fast-api/data/app.db
+# back-end/fast-api/data/app.db
+back-end/fast-api/data/*.db
