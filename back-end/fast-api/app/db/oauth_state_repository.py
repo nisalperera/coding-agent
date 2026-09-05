@@ -29,12 +29,24 @@ def save_oauth_state(state: str, code_verifier: str, cookie_nonce: str, ttl_seco
 
 def consume_oauth_state(state: str, cookie_nonce: str) -> Optional[str]:
     now = int(time.time())
-    with db_session() as session:
-        row = session.scalar(select(OAuthState).where(OAuthState.state == state))
-        session.execute(delete(OAuthState).where(OAuthState.state == state))
 
-        if row is None or row.expires_at <= now:
+    with db_session() as session:
+        row = session.scalar(
+            select(OAuthState)
+            .where(OAuthState.state == state)
+            .with_for_update()
+        )
+
+        if row is None:
             return None
+
+        if row.expires_at <= now:
+            session.delete(row)
+            return None
+
         if not secrets.compare_digest(row.cookie_nonce, cookie_nonce):
             return None
-        return row.code_verifier
+
+        code_verifier = row.code_verifier
+        session.delete(row)
+        return code_verifier

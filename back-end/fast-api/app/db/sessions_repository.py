@@ -34,16 +34,25 @@ def create_session(user_id: str) -> str:
 def get_session_user(token: str) -> Optional[dict[str, Any]]:
     now = int(time.time())
     token_hash = hash_session_token(token)
+
     with db_session() as session:
-        row = session.execute(
-            select(User, SessionRecord)
-            .join(SessionRecord, SessionRecord.user_id == User.user_id)
-            .where(SessionRecord.token_hash == token_hash, SessionRecord.expires_at > now)
-        ).first()
-        if row is None:
+        session_record = session.scalar(
+            select(SessionRecord)
+            .where(SessionRecord.token_hash == token_hash)
+            .with_for_update()
+        )
+        if session_record is None:
             return None
 
-        user, session_record = row
+        if session_record.expires_at <= now:
+            session.delete(session_record)
+            return None
+
+        user = session.get(User, session_record.user_id)
+        if user is None:
+            session.delete(session_record)
+            return None
+
         session_record.last_seen_at = now
 
         return {

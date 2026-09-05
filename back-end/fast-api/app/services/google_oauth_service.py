@@ -27,7 +27,7 @@ from jwt import PyJWKClient
 from app.core.config import settings
 from app.db.oauth_state_repository import consume_oauth_state, save_oauth_state
 from app.db.sessions_repository import create_session
-from app.db.users_repository import upsert_google_user
+from app.db.users_repository import upsert_google_user_claims
 
 _oauth_state_serializer = URLSafeTimedSerializer(settings.SESSION_SECRET, salt=settings.OAUTH_STATE_COOKIE_SALT)
 
@@ -131,7 +131,7 @@ async def handle_callback(code: str, state: str, request: Request) -> JSONRespon
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Google ID token validation failed") from exc
 
-    user = await asyncio.to_thread(upsert_google_user, claims)
+    user = await asyncio.to_thread(upsert_google_user_claims, claims)
     session_token = await asyncio.to_thread(create_session, user["user_id"])
 
     response = JSONResponse({

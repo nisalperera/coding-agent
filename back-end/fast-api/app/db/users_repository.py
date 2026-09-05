@@ -12,7 +12,7 @@ from app.db.models import User
 from app.db.database import db_session
 
 
-def upsert_google_user(claims: dict[str, Any]) -> dict[str, Any]:
+def upsert_google_user_claims(claims: dict[str, Any]) -> dict[str, Any]:
     google_sub = claims.get("sub")
     email = claims.get("email")
     email_verified = bool(claims.get("email_verified"))

@@ -1,40 +1,88 @@
-"""pending_actions table access (replaces DynamoDB pending-actions table)."""
-import json
+"""Transactional pending-action persistence backed by MySQL/InnoDB."""
+
+from __future__ import annotations
+
 import time
-from typing import Any, Optional
+from typing import Any
 
-from app.db.database import db_connection
+from sqlalchemy import delete, select
+
+from app.db.database import db_session
+from app.db.models import PendingAction
 
 
-def create_pending_action(action_id: str, user_id: str, tool_name: str, args: dict[str, Any], ttl_seconds: int = 600) -> None:
+def create_pending_action(
+    action_id: str,
+    user_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    ttl_seconds: int = 600,
+) -> None:
     now = int(time.time())
-    with db_connection() as connection:
-        connection.execute(
-            "INSERT INTO pending_actions (action_id, user_id, tool_name, args_json, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (action_id, user_id, tool_name, json.dumps(args), now, now + ttl_seconds),
+
+    with db_session() as session:
+        session.add(
+            PendingAction(
+                action_id=action_id,
+                user_id=user_id,
+                tool_name=tool_name,
+                args=args,
+                created_at=now,
+                expires_at=now + ttl_seconds,
+            )
         )
 
 
-def get_pending_action(action_id: str) -> Optional[dict[str, Any]]:
-    with db_connection() as connection:
-        row = connection.execute(
-            "SELECT action_id, user_id, tool_name, args_json, created_at, expires_at FROM pending_actions WHERE action_id = ?",
-            (action_id,),
-        ).fetchone()
-    if not row:
-        return None
-    item = dict(row)
-    item["args"] = json.loads(item.pop("args_json"))
-    return item
+def get_pending_action(
+    action_id: str,
+    *,
+    user_id: str | None = None,
+) -> dict[str, Any] | None:
+    now = int(time.time())
+
+    with db_session() as session:
+        statement = select(PendingAction).where(
+            PendingAction.action_id == action_id,
+            PendingAction.expires_at > now,
+        )
+        if user_id is not None:
+            statement = statement.where(PendingAction.user_id == user_id)
+
+        action = session.scalar(statement)
+        if action is None:
+            return None
+
+        return {
+            "action_id": action.action_id,
+            "user_id": action.user_id,
+            "tool_name": action.tool_name,
+            "args": action.args,
+            "created_at": action.created_at,
+            "expires_at": action.expires_at,
+        }
 
 
-def delete_pending_action(action_id: str) -> None:
-    with db_connection() as connection:
-        connection.execute("DELETE FROM pending_actions WHERE action_id = ?", (action_id,))
+def delete_pending_action(
+    action_id: str,
+    *,
+    user_id: str | None = None,
+) -> bool:
+    with db_session() as session:
+        statement = delete(PendingAction).where(
+            PendingAction.action_id == action_id
+        )
+        if user_id is not None:
+            statement = statement.where(PendingAction.user_id == user_id)
+
+        result = session.execute(statement)
+        return bool(result.rowcount)
 
 
 def purge_expired_pending_actions() -> int:
     now = int(time.time())
-    with db_connection() as connection:
-        cursor = connection.execute("DELETE FROM pending_actions WHERE expires_at <= ?", (now,))
-        return cursor.rowcount
+
+    with db_session() as session:
+        result = session.execute(
+            delete(PendingAction).where(PendingAction.expires_at <= now)
+        )
+        return result.rowcount or 0

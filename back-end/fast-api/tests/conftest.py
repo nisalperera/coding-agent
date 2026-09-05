@@ -1,8 +1,26 @@
 from __future__ import annotations
 
 import os
+import time
+import pytest
+
+from collections.abc import Iterator
 
 from cryptography.fernet import Fernet
+
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
+
+
+from app.db.database import SessionLocal
+from app.db.models import (
+    IntegrationOAuthState,
+    OAuthState,
+    PendingAction,
+    SessionRecord,
+    User,
+    UserIntegration
+)
 
 
 os.environ["SKIP_DOTENV"] = "true"
@@ -52,3 +70,49 @@ os.environ.setdefault(
 )
 os.environ["GITLAB_OAUTH_SCOPES"] = "read_user"
 os.environ["GITLAB_REPOSITORY_WRITE_ENABLED"] = "false"
+
+@pytest.fixture
+def db() -> Iterator[Session]:
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@pytest.fixture(autouse=True)
+def clean_database() -> Iterator[None]:
+    """Keep this fixture restricted to the disposable MySQL test database."""
+    session = SessionLocal()
+    try:
+        session.execute(delete(IntegrationOAuthState))
+        session.execute(delete(OAuthState))
+        session.execute(delete(PendingAction))
+        session.execute(delete(UserIntegration))
+        session.execute(delete(SessionRecord))
+        session.execute(delete(User))
+        session.commit()
+        yield
+    finally:
+        session.rollback()
+        session.close()
+
+
+@pytest.fixture
+def now() -> int:
+    return int(time.time())
+
+
+@pytest.fixture
+def google_claims() -> dict[str, object]:
+    return {
+        "sub": "google-subject-123",
+        "email": "engineer@example.com",
+        "email_verified": True,
+        "name": "Test Engineer",
+        "picture": "https://example.test/avatar.png",
+    }
