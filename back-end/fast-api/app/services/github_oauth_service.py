@@ -10,11 +10,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.crypto import TokenEncryptionError
+from app.db.database import db_session
 from app.db.integrations_repository import (
     IntegrationNotFoundError,
     integrations_repository,
 )
-from app.db.database import db_session
 
 
 class GitHubOAuthError(Exception):
@@ -89,24 +89,20 @@ def _store_github_integration(
         )
 
 
-def _load_github_integration(user_id: str) -> dict[str, Any] | None:
+
+def _load_github_integration(user_id: str) -> dict[str, Any]:
     """Load non-secret GitHub connection metadata for internal status checks."""
     with db_session() as db:
-        integration = integrations_repository.get_by_user_and_provider(
+        status = integrations_repository.get_public_status_by_user_and_provider(
             db,
             user_id=user_id,
             provider="github",
         )
-        if integration is None:
-            return None
 
         return {
-            "user_id": integration.user_id,
-            "provider": integration.provider,
-            "username": integration.username,
-            "connected_at": integration.connected_at,
-            "updated_at": integration.updated_at,
-            "token_expires_at": integration.token_expires_at,
+            "connected": status.connected,
+            "username": status.username,
+            "connected_at": status.connected_at,
         }
 
 
@@ -136,10 +132,8 @@ def _delete_github_integration(user_id: str) -> bool:
 async def get_user_integration(
     user_id: str,
     provider: str,
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     """Return connection metadata only; no token or ciphertext is exposed."""
-    if provider != "github":
-        return None
     return await asyncio.to_thread(_load_github_integration, user_id)
 
 

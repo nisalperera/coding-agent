@@ -7,12 +7,12 @@ Alembic owns schema creation and migrations; importing this module performs no D
 from __future__ import annotations
 
 import uuid
-from typing import Any, Optional
+from typing import Any, ClassVar
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.mysql import JSON as MySQLJSON, BIGINT
+from sqlalchemy import Boolean, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.mysql import BIGINT
+from sqlalchemy.dialects.mysql import JSON as MySQLJSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
 
 UUID_LENGTH = 36
 SESSION_TOKEN_HASH_LENGTH = 64
@@ -27,7 +27,7 @@ def new_uuid() -> str:
 class Base(DeclarativeBase):
     """Base metadata for MySQL/InnoDB ORM tables."""
 
-    __table_args__ = {
+    __table_args__: ClassVar[dict[str, str]] = {
         "mysql_engine": "InnoDB",
         "mysql_charset": "utf8mb4",
         "mysql_collate": "utf8mb4_unicode_ci",
@@ -45,27 +45,27 @@ class User(Base):
     google_sub: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    picture: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    picture: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
     updated_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
-    sessions: Mapped[list["SessionRecord"]] = relationship(
+    sessions: Mapped[list[SessionRecord]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    integrations: Mapped[list["UserIntegration"]] = relationship(
+    integrations: Mapped[list[UserIntegration]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    pending_actions: Mapped[list["PendingAction"]] = relationship(
+    pending_actions: Mapped[list[PendingAction]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    integration_oauth_states: Mapped[list["IntegrationOAuthState"]] = relationship(
+    integration_oauth_states: Mapped[list[IntegrationOAuthState]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -107,7 +107,7 @@ class SessionRecord(Base):
     created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
     last_seen_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
-    user: Mapped["User"] = relationship(back_populates="sessions")
+    user: Mapped[User] = relationship(back_populates="sessions")
 
 
 class UserIntegration(Base):
@@ -121,13 +121,14 @@ class UserIntegration(Base):
     )
     provider: Mapped[str] = mapped_column(String(PROVIDER_LENGTH), primary_key=True)
     access_token_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
-    refresh_token_ciphertext: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    token_expires_at: Mapped[Optional[BIGINT]] = mapped_column(BIGINT, nullable=True)
-    username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    refresh_token_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[BIGINT | None] = mapped_column(BIGINT, nullable=True)
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
     connected_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
     updated_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
-    user: Mapped["User"] = relationship(back_populates="integrations")
+    user: Mapped[User] = relationship(back_populates="integrations")
 
 
 class PendingAction(Base):
@@ -153,7 +154,7 @@ class PendingAction(Base):
     created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
     expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
-    user: Mapped["User"] = relationship(back_populates="pending_actions")
+    user: Mapped[User] = relationship(back_populates="pending_actions")
 
 
 class IntegrationOAuthState(Base):
@@ -177,4 +178,4 @@ class IntegrationOAuthState(Base):
     expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
     created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
-    user: Mapped["User"] = relationship(back_populates="integration_oauth_states")
+    user: Mapped[User] = relationship(back_populates="integration_oauth_states")
