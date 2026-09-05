@@ -158,23 +158,25 @@ class PendingAction(Base):
 
 
 class IntegrationOAuthState(Base):
-    """Short-lived OAuth/PKCE state for a user connecting a provider account."""
+    """Short-lived OAuth and optional PKCE state for provider connections."""
 
     __tablename__ = "integration_oauth_states"
     __table_args__ = (
         Index("idx_integration_oauth_states_user_id", "user_id"),
         Index("idx_integration_oauth_states_expires_at", "expires_at"),
+        Index("idx_integration_oauth_states_user_provider", "user_id", "provider"),
         Base.__table_args__,
     )
 
-    state: Mapped[str] = mapped_column(String(255), primary_key=True)
+    state: Mapped[str] = mapped_column(String(128), primary_key=True)
     user_id: Mapped[str] = mapped_column(
         String(UUID_LENGTH),
         ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
     provider: Mapped[str] = mapped_column(String(PROVIDER_LENGTH), nullable=False)
-    code_verifier: Mapped[str] = mapped_column(String(255), nullable=False)
+    cookie_nonce: Mapped[str] = mapped_column(String(128), nullable=False)
+    code_verifier: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
     created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
