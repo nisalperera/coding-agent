@@ -1,31 +1,40 @@
 """
-GitHub and GitLab repository management tools via REST API only. Covers
-branches, file commits, pull/merge requests, and issues. Repo creation and
-deletion are intentionally excluded.
+GitHub and GitLab repository management tools via REST API only.
 
-GITHUB_TOKEN / GITLAB_TOKEN env vars are fallbacks used when a calling user
-has not connected their own account via OAuth. Each github_* function accepts
-an optional `github_token` kwarg and each gitlab_* function an optional
-`gitlab_token` kwarg, injected server-side by app/tools/dispatch.py.
+All provider credentials are injected by app.tools.dispatch after resolving the
+authenticated user's encrypted integration record. Repository tools do not
+read shared environment provider tokens and do not accept browser-supplied
+credentials.
 """
 import base64
-from typing import Optional
 
 import requests
 
 from app.core.config import settings
 
 
-def _github_headers(token: Optional[str] = None) -> dict[str, str]:
+def _require_provider_token(token: str | None, provider: str) -> str:
+    """Require a non-empty backend-injected provider credential."""
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError(f"{provider} credential is required")
+
+    return token.strip()
+
+
+def _github_headers(token: str | None) -> dict[str, str]:
+    access_token = _require_provider_token(token, "GitHub")
     return {
-        "Authorization": f"Bearer {token or settings.GITHUB_TOKEN}",
+        "Authorization": f"Bearer {access_token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
 
-def _gitlab_headers(token: Optional[str] = None) -> dict[str, str]:
-    return {"PRIVATE-TOKEN": token or settings.GITLAB_TOKEN}
+def _gitlab_headers(token: str | None) -> dict[str, str]:
+    access_token = _require_provider_token(token, "GitLab")
+    return {
+        "PRIVATE-TOKEN": access_token,
+    }
 
 
 def github_create_branch(owner, repo, new_branch, from_branch="main", github_token=None):
@@ -67,7 +76,14 @@ def github_open_pull_request(owner, repo, title, head, base, body="", github_tok
     return f"Pull request #{pr['number']} opened: {pr['html_url']}"
 
 
-def github_create_issue(owner, repo, title, body="", github_token=None):
+def github_create_issue(
+    owner: str,
+    repo: str,
+    title: str,
+    body: str = "",
+    *,
+    github_token: str,
+) -> str:
     resp = requests.post(f"{settings.GITHUB_API}/repos/{owner}/{repo}/issues", headers=_github_headers(github_token), json={"title": title, "body": body})
     if resp.status_code >= 400:
         return f"Error creating issue: {resp.status_code} {resp.text}"
@@ -115,7 +131,13 @@ def gitlab_open_merge_request(project_id, title, source_branch, target_branch, d
     return f"Merge request !{mr['iid']} opened: {mr['web_url']}"
 
 
-def gitlab_create_issue(project_id, title, description="", gitlab_token=None):
+def gitlab_create_issue(
+    project_id: str,
+    title: str,
+    description: str = "",
+    *,
+    gitlab_token: str,
+) -> str:
     resp = requests.post(f"{settings.GITLAB_API}/projects/{project_id}/issues", headers=_gitlab_headers(gitlab_token), json={"title": title, "description": description})
     if resp.status_code >= 400:
         return f"Error creating issue: {resp.status_code} {resp.text}"

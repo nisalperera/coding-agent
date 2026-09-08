@@ -15,6 +15,7 @@ from app.db.database import db_session
 from app.db.models import User
 from app.services.github_oauth_service import GitHubOAuthError
 from app.tools import dispatch
+from app.tools.dispatch import ProviderNotConnectedError
 from main import app
 
 TEST_USER = {
@@ -147,16 +148,14 @@ async def test_dispatch_requires_connected_github(
         {"github_list_repositories"},
     )
 
-    result = await dispatch.call_repo_tool(
-        "github_list_repositories",
-        {},
-        "00000000-0000-0000-0000-000000000106",
-    )
+    with pytest.raises(ProviderNotConnectedError) as exc_info:
+        await dispatch.call_repo_tool(
+            "github_list_repositories",
+            {},
+            "00000000-0000-0000-0000-000000000106",
+        )
 
-    assert result == {
-        "error": "github_integration_required",
-        "message": "Connect your GitHub account before using GitHub repository tools.",
-    }
+    assert exc_info.value.provider == "github"
     assert called is False
 
 
