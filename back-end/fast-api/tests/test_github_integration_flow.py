@@ -1,14 +1,69 @@
 from __future__ import annotations
 
+import time
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+import respx
+from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from app.core.crypto import TokenEncryptionError
-from app.services import github_oauth_service
+from app.auth.dependencies import current_user
+from app.db.database import db_session
+from app.db.models import User
 from app.services.github_oauth_service import GitHubOAuthError
 from app.tools import dispatch
+from main import app
+
+TEST_USER = {
+    "user_id": "11111111-1111-1111-1111-111111111111",
+    "email": "github-oauth-route-test@example.test",
+    "name": "GitHub OAuth Route Test",
+}
+
+
+@pytest.fixture
+def client(github_oauth_user: dict[str, str]) -> TestClient:
+    async def override_current_user() -> dict[str, str]:
+        return github_oauth_user
+
+    app.dependency_overrides[current_user] = override_current_user
+
+    with TestClient(app, follow_redirects=False) as test_client:
+        yield test_client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def github_oauth_user() -> dict[str, str]:
+    """
+    Create the parent MySQL user required by the integration OAuth state
+    foreign-key relationship.
+    """
+    now = int(time.time())
+
+    with db_session() as db:
+        existing_user = db.scalar(
+            select(User).where(User.user_id == TEST_USER["user_id"])
+        )
+
+        if existing_user is None:
+            db.add(
+                User(
+                    user_id=TEST_USER["user_id"],
+                    google_sub="github-oauth-route-test-subject",
+                    email=TEST_USER["email"],
+                    name=TEST_USER["name"],
+                    picture=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    return TEST_USER
 
 
 class FakeResponse:
@@ -63,133 +118,6 @@ class FakeGitHubClient:
 
 
 @pytest.mark.asyncio
-async def test_callback_requires_code_without_network(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = FakeGitHubClient()
-
-    status, payload = await github_oauth_service.handle_github_oauth_callback(
-        client,
-        {"redirect_uri": "http://localhost:8000/callback"},
-        "00000000-0000-0000-0000-000000000101",
-    )
-
-    assert status == 400
-    assert payload == {"error": "missing_github_oauth_code"}
-    assert client.post_calls == []
-    assert client.get_calls == []
-
-
-@pytest.mark.asyncio
-async def test_callback_requires_redirect_uri_without_network(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = FakeGitHubClient()
-
-    status, payload = await github_oauth_service.handle_github_oauth_callback(
-        client,
-        {"code": "test-code"},
-        "00000000-0000-0000-0000-000000000102",
-    )
-
-    assert status == 400
-    assert payload == {"error": "missing_github_oauth_redirect_uri"}
-    assert client.post_calls == []
-    assert client.get_calls == []
-
-
-@pytest.mark.asyncio
-async def test_callback_stores_token_and_returns_public_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    stored: dict[str, str] = {}
-
-    def fake_store(user_id: str, access_token: str, username: str) -> None:
-        stored["user_id"] = user_id
-        stored["access_token"] = access_token
-        stored["username"] = username
-
-    monkeypatch.setattr(github_oauth_service, "_store_github_integration", fake_store)
-    client = FakeGitHubClient()
-
-    status, payload = await github_oauth_service.handle_github_oauth_callback(
-        client,
-        {
-            "code": "test-code",
-            "redirect_uri": "http://localhost:8000/callback",
-        },
-        "00000000-0000-0000-0000-000000000103",
-    )
-
-    assert status == 200
-    assert payload == {
-        "connected": True,
-        "provider": "github",
-        "username": "octocat",
-    }
-    assert stored == {
-        "user_id": "00000000-0000-0000-0000-000000000103",
-        "access_token": "test-access-token",
-        "username": "octocat",
-    }
-    assert len(client.post_calls) == 1
-    assert len(client.get_calls) == 1
-    assert "access_token" not in payload
-    assert "test-access-token" not in str(payload)
-
-
-@pytest.mark.asyncio
-async def test_callback_hides_provider_error_details() -> None:
-    client = FakeGitHubClient(
-        token_response=FakeResponse(
-            {"error": "bad_verification_code"},
-            status_code=400,
-        )
-    )
-
-    status, payload = await github_oauth_service.handle_github_oauth_callback(
-        client,
-        {
-            "code": "bad-code",
-            "redirect_uri": "http://localhost:8000/callback",
-        },
-        "00000000-0000-0000-0000-000000000104",
-    )
-
-    assert status == 400
-    assert payload == {"error": "github_oauth_failed"}
-    assert "bad_verification_code" not in str(payload)
-
-
-@pytest.mark.asyncio
-async def test_callback_hides_storage_error_details(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def failing_store(user_id: str, access_token: str, username: str) -> None:
-        raise TokenEncryptionError("test-only encryption failure")
-
-    monkeypatch.setattr(
-        github_oauth_service,
-        "_store_github_integration",
-        failing_store,
-    )
-    client = FakeGitHubClient()
-
-    status, payload = await github_oauth_service.handle_github_oauth_callback(
-        client,
-        {
-            "code": "test-code",
-            "redirect_uri": "http://localhost:8000/callback",
-        },
-        "00000000-0000-0000-0000-000000000105",
-    )
-
-    assert status == 500
-    assert payload == {"error": "github_integration_storage_failed"}
-    assert "encryption failure" not in str(payload)
-
-
-@pytest.mark.asyncio
 async def test_dispatch_requires_connected_github(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -220,10 +148,10 @@ async def test_dispatch_requires_connected_github(
     )
 
     result = await dispatch.call_repo_tool(
-    "github_list_repositories",
-    {},
-    "00000000-0000-0000-0000-000000000106",
-)
+        "github_list_repositories",
+        {},
+        "00000000-0000-0000-0000-000000000106",
+    )
 
     assert result == {
         "error": "github_integration_required",
@@ -271,3 +199,81 @@ async def test_dispatch_passes_token_only_to_internal_tool(
     assert received_kwargs["owner"] == "octocat"
     assert received_kwargs["github_token"] == "test-access-token"
     assert "test-access-token" not in str(result)
+
+
+def _start_github_login(client: TestClient) -> str:
+    response = client.get("/v1/auth/github/login")
+
+    assert response.status_code == 303
+    assert "github.com/login/oauth/authorize" in response.headers["location"]
+
+    location = response.headers["location"]
+    query = parse_qs(urlparse(location).query)
+    state = query["state"][0]
+
+    assert state
+    assert client.cookies.get("github_integration_oauth")
+
+    return state
+
+
+@respx.mock
+def test_github_callback_storage_failure_redirects_safely(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api import integration as integration_api
+    from app.core.config import settings
+    from app.services.github_oauth_service import GitHubOAuthError
+
+    state = _start_github_login(client)
+
+    token_route = respx.post(settings.GITHUB_TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={"access_token": "test-access-token"},
+        )
+    )
+    user_route = respx.get(settings.GITHUB_USER_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={"login": "octocat"},
+        )
+    )
+
+    async def failing_store_github_integration(
+        *,
+        user_id: str,
+        access_token: str,
+        username: str,
+    ) -> None:
+        raise GitHubOAuthError("test-only storage failure")
+
+    monkeypatch.setattr(
+        integration_api,
+        "store_github_integration",
+        failing_store_github_integration,
+    )
+
+    response = client.get(
+        "/v1/auth/github/callback",
+        params={
+            "code": "test-code",
+            "state": state,
+        },
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("http://localhost:3000/")
+    assert "integration=github" in response.headers["location"]
+    assert "connected=0" in response.headers["location"]
+
+    assert token_route.called
+    assert user_route.called
+
+    assert "test-only" not in response.headers["location"]
+    assert "storage" not in response.headers["location"].lower()
+
+    set_cookie = response.headers["set-cookie"].lower()
+    assert "github_integration_oauth=" in set_cookie
+    assert "max-age=0" in set_cookie or "expires=" in set_cookie

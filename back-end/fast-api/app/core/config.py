@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+from pydantic import Field
 
 
 def _require(name: str) -> str:
@@ -37,6 +38,7 @@ def _validate_http_url(name: str, value: str, *, allow_local_http: bool = False)
         raise RuntimeError(f"{name} must be an absolute HTTP(S) URL")
 
     hostname = (parsed.hostname or "").lower()
+    print(name, hostname)
     is_local = hostname in {"localhost", "127.0.0.1", "::1"}
     if parsed.scheme != "https" and not (allow_local_http and is_local):
         raise RuntimeError(f"{name} must use HTTPS outside local development")
@@ -97,9 +99,11 @@ class Settings:
 
     FRONTEND_ORIGIN: str = _require("FRONTEND_ORIGIN")
     CORS_ALLOW_ORIGINS_RAW: str = _optional("CORS_ALLOW_ORIGINS", FRONTEND_ORIGIN)
-    CORS_ALLOW_ORIGINS: list[str] = []
+    CORS_ALLOW_ORIGINS: list[str] = Field(default_factory=list)
 
-    INTEGRATION_TOKEN_ENCRYPTION_KEY: str = _optional("INTEGRATION_TOKEN_ENCRYPTION_KEY")
+    INTEGRATION_TOKEN_ENCRYPTION_KEY: str = _optional(
+        "INTEGRATION_TOKEN_ENCRYPTION_KEY"
+    )
     INTEGRATIONS_ENABLED: bool = _as_bool("INTEGRATIONS_ENABLED", True)
     INTEGRATION_OAUTH_STATE_TTL_S: int = int(
         _optional("INTEGRATION_OAUTH_STATE_TTL_S", "600")
@@ -140,7 +144,9 @@ class Settings:
     )
     GITLAB_OAUTH_STATE_COOKIE_NAME: str = "gitlab_oauth_state"
 
-    GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
+    GOOGLE_DISCOVERY_URL = (
+        "https://accounts.google.com/.well-known/openid-configuration"
+    )
     OAUTH_STATE_COOKIE_NAME = "google_oauth_state"
 
     VLLM_ENDPOINT = "http://127.0.0.1:8001/v1/chat/completions"
@@ -182,7 +188,9 @@ class Settings:
         if cls.HTTP_TIMEOUT_S <= 0:
             raise RuntimeError("HTTP_TIMEOUT_S must be positive")
         if not local_env and not cls.COOKIE_SECURE:
-            raise RuntimeError("COOKIE_SECURE must be true outside development and test")
+            raise RuntimeError(
+                "COOKIE_SECURE must be true outside development and test"
+            )
 
         gitlab_scopes = _parse_gitlab_scopes(cls.GITLAB_OAUTH_SCOPES)
         if "api" in gitlab_scopes and not cls.GITLAB_REPOSITORY_WRITE_ENABLED:

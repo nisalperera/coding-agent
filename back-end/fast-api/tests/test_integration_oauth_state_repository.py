@@ -30,7 +30,7 @@ def create_user(user_id: str) -> None:
         )
 
 
-def test_valid_state_consumes_once_and_returns_user_binding() -> None:
+def test_valid_state_consumes_once_and_returns_user_binding(now) -> None:
     user_id = "10000000-0000-0000-0000-000000000001"
     create_user(user_id)
 
@@ -39,12 +39,12 @@ def test_valid_state_consumes_once_and_returns_user_binding() -> None:
         provider="github",
         state="github-valid-state",
         cookie_nonce="github-valid-nonce",
-        ttl_seconds=600,
+        expires_at=now + 600,
     )
 
     assert consume_integration_oauth_state(
         state="github-valid-state",
-        provider="github",
+        expected_provider="github",
         cookie_nonce="github-valid-nonce",
     ) == {
         "user_id": user_id,
@@ -53,12 +53,12 @@ def test_valid_state_consumes_once_and_returns_user_binding() -> None:
 
     assert consume_integration_oauth_state(
         state="github-valid-state",
-        provider="github",
+        expected_provider="github",
         cookie_nonce="github-valid-nonce",
     ) is None
 
 
-def test_gitlab_state_returns_pkce_verifier() -> None:
+def test_gitlab_state_returns_pkce_verifier(now) -> None:
     user_id = "10000000-0000-0000-0000-000000000002"
     create_user(user_id)
 
@@ -68,12 +68,12 @@ def test_gitlab_state_returns_pkce_verifier() -> None:
         state="gitlab-valid-state",
         cookie_nonce="gitlab-valid-nonce",
         code_verifier="gitlab-s256-verifier",
-        ttl_seconds=600,
+        expires_at=now + 600,
     )
 
     assert consume_integration_oauth_state(
         state="gitlab-valid-state",
-        provider="gitlab",
+        expected_provider="gitlab",
         cookie_nonce="gitlab-valid-nonce",
     ) == {
         "user_id": user_id,
@@ -81,7 +81,7 @@ def test_gitlab_state_returns_pkce_verifier() -> None:
     }
 
 
-def test_wrong_provider_preserves_state_for_expected_provider(db) -> None:
+def test_wrong_provider_preserves_state_for_expected_provider(db, now) -> None:
     user_id = "10000000-0000-0000-0000-000000000003"
     create_user(user_id)
 
@@ -90,12 +90,12 @@ def test_wrong_provider_preserves_state_for_expected_provider(db) -> None:
         provider="github",
         state="provider-bound-state",
         cookie_nonce="provider-bound-nonce",
-        ttl_seconds=600,
+        expires_at=now + 600,
     )
 
     assert consume_integration_oauth_state(
         state="provider-bound-state",
-        provider="gitlab",
+        expected_provider="gitlab",
         cookie_nonce="provider-bound-nonce",
     ) is None
 
@@ -103,7 +103,7 @@ def test_wrong_provider_preserves_state_for_expected_provider(db) -> None:
 
     assert consume_integration_oauth_state(
         state="provider-bound-state",
-        provider="github",
+        expected_provider="github",
         cookie_nonce="provider-bound-nonce",
     ) == {
         "user_id": user_id,
@@ -111,7 +111,7 @@ def test_wrong_provider_preserves_state_for_expected_provider(db) -> None:
     }
 
 
-def test_wrong_nonce_preserves_state_for_legitimate_browser(db) -> None:
+def test_wrong_nonce_preserves_state_for_legitimate_browser(db, now) -> None:
     user_id = "10000000-0000-0000-0000-000000000004"
     create_user(user_id)
 
@@ -121,12 +121,12 @@ def test_wrong_nonce_preserves_state_for_legitimate_browser(db) -> None:
         state="nonce-bound-state",
         cookie_nonce="correct-browser-nonce",
         code_verifier="gitlab-s256-verifier",
-        ttl_seconds=600,
+        expires_at=now + 600,
     )
 
     assert consume_integration_oauth_state(
         state="nonce-bound-state",
-        provider="gitlab",
+        expected_provider="gitlab",
         cookie_nonce="wrong-browser-nonce",
     ) is None
 
@@ -134,7 +134,7 @@ def test_wrong_nonce_preserves_state_for_legitimate_browser(db) -> None:
 
     assert consume_integration_oauth_state(
         state="nonce-bound-state",
-        provider="gitlab",
+        expected_provider="gitlab",
         cookie_nonce="correct-browser-nonce",
     ) == {
         "user_id": user_id,
@@ -142,7 +142,7 @@ def test_wrong_nonce_preserves_state_for_legitimate_browser(db) -> None:
     }
 
 
-def test_expired_state_is_rejected_and_removed(db) -> None:
+def test_expired_state_is_rejected_and_removed(db, now) -> None:
     user_id = "10000000-0000-0000-0000-000000000005"
     create_user(user_id)
 
@@ -151,7 +151,7 @@ def test_expired_state_is_rejected_and_removed(db) -> None:
         provider="github",
         state="expired-state",
         cookie_nonce="expired-nonce",
-        ttl_seconds=600,
+        expires_at=now - 1,
     )
 
     with db_session() as session:
@@ -161,14 +161,14 @@ def test_expired_state_is_rejected_and_removed(db) -> None:
 
     assert consume_integration_oauth_state(
         state="expired-state",
-        provider="github",
+        expected_provider="github",
         cookie_nonce="expired-nonce",
     ) is None
 
     assert db.get(IntegrationOAuthState, "expired-state") is None
 
 
-def test_saving_state_purges_expired_rows(db) -> None:
+def test_saving_state_purges_expired_rows(db, now) -> None:
     user_id = "10000000-0000-0000-0000-000000000006"
     create_user(user_id)
 
@@ -190,7 +190,7 @@ def test_saving_state_purges_expired_rows(db) -> None:
         provider="github",
         state="fresh-state",
         cookie_nonce="fresh-nonce",
-        ttl_seconds=600,
+        expires_at=now + 600,
     )
 
     assert db.get(IntegrationOAuthState, "stale-state") is None
@@ -200,31 +200,31 @@ def test_saving_state_purges_expired_rows(db) -> None:
 def test_unknown_state_is_rejected() -> None:
     assert consume_integration_oauth_state(
         state="unknown-state",
-        provider="github",
+        expected_provider="github",
         cookie_nonce="any-nonce",
     ) is None
 
 
 @pytest.mark.parametrize("provider", ["", "bitbucket", "GITHUB"])
-def test_unsupported_provider_is_rejected(provider: str) -> None:
+def test_unsupported_provider_is_rejected(provider: str, now: int) -> None:
     with pytest.raises(ValueError):
         save_integration_oauth_state(
             user_id="10000000-0000-0000-0000-000000000007",
             provider=provider,
             state="state",
             cookie_nonce="nonce",
-            ttl_seconds=600,
+            expires_at=now + 600,
         )
 
     with pytest.raises(ValueError):
         consume_integration_oauth_state(
             state="state",
-            provider=provider,
+            expected_provider=provider,
             cookie_nonce="nonce",
         )
 
 
-def test_concurrent_state_consumption_has_exactly_one_success() -> None:
+def test_concurrent_state_consumption_has_exactly_one_success(now: int) -> None:
     user_id = "10000000-0000-0000-0000-000000000008"
     create_user(user_id)
 
@@ -234,13 +234,13 @@ def test_concurrent_state_consumption_has_exactly_one_success() -> None:
         state="concurrent-state",
         cookie_nonce="concurrent-nonce",
         code_verifier="gitlab-s256-verifier",
-        ttl_seconds=600,
+        expires_at= now + 600,
     )
 
     def consume() -> dict[str, str | None] | None:
         return consume_integration_oauth_state(
             state="concurrent-state",
-            provider="gitlab",
+            expected_provider="gitlab",
             cookie_nonce="concurrent-nonce",
         )
 

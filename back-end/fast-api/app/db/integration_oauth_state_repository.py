@@ -39,7 +39,7 @@ def save_integration_oauth_state(
     provider: str,
     state: str,
     cookie_nonce: str,
-    ttl_seconds: int,
+    expires_at: int,
     code_verifier: str | None = None,
 ) -> None:
     """Persist a short-lived, provider-bound OAuth callback state."""
@@ -48,8 +48,8 @@ def save_integration_oauth_state(
 
     if not user_id or not state or not cookie_nonce:
         raise ValueError("user_id, state, and cookie_nonce are required")
-    if ttl_seconds <= 0:
-        raise ValueError("ttl_seconds must be positive")
+    if expires_at <= 0:
+        raise ValueError("expires_at must be a positive timestamp")
 
     now = int(time.time())
     with db_session() as session:
@@ -65,7 +65,7 @@ def save_integration_oauth_state(
                 state=state,
                 cookie_nonce=cookie_nonce,
                 code_verifier=code_verifier,
-                expires_at=now + ttl_seconds,
+                expires_at=expires_at,
                 created_at=now,
             )
         )
@@ -74,7 +74,7 @@ def save_integration_oauth_state(
 def consume_integration_oauth_state(
     *,
     state: str,
-    provider: str,
+        expected_provider: str,
     cookie_nonce: str,
 ) -> ConsumedIntegrationOAuthState | None:
     """Atomically validate and consume a provider OAuth callback state.
@@ -85,7 +85,7 @@ def consume_integration_oauth_state(
     continues, which prevents replay even if token exchange later fails.
     """
 
-    _validate_provider(provider)
+    _validate_provider(expected_provider)
 
     if not state or not cookie_nonce:
         return None
@@ -101,7 +101,7 @@ def consume_integration_oauth_state(
         if row is None:
             return None
 
-        if row.provider != provider:
+        if row.provider != expected_provider:
             return None
 
         if not secrets.compare_digest(row.cookie_nonce, cookie_nonce):

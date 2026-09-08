@@ -1,7 +1,7 @@
 fastapi[standard]>=0.111
 httpx>=0.27
 pyjwt[crypto]>=2.8
-itsdangerous>=2.2
+itsdangerous>=2.2,<3.0
 pydantic>=2.7
 python-dotenv>=1.0
 requests>=2.32
@@ -9,3 +9,4 @@ sqlalchemy>=2.0,<3.0
 alembic>=1.13,<2.0
 pymysql>=1.1,<2.0
 cryptography>=42,<46
+respx>=0.21,<1.0
