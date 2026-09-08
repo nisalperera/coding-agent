@@ -8,16 +8,18 @@ Wire format on the same stream:
   2. SSE frames ("data: {...}\n\n") for model tokens once generation starts,
      terminated by "data: [DONE]\n\n".
 
-Change from the previous version: `body.gitlab_token` is no longer read or
-passed to call_tool(). GitLab credentials are now resolved server-side from
-the encrypted integration store, the same way GitHub credentials already
-are (see app/tools/dispatch.py). If your ChatRequest schema still declares a
-`gitlab_token` field, it is safe to remove it once no caller supplies it.
+Authenticated chat route.
+
+Provider credentials are resolved only inside backend-owned dispatch for the
+authenticated user. Browser chat requests do not accept or forward provider
+tokens, OAuth authorization codes, OAuth state, callback values, redirect URIs,
+client configuration, or PKCE material.
 """
 import json
 import logging
 import uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -29,12 +31,13 @@ from app.core.rate_limit import check_rate_limit
 from app.core.streaming import json_line, sse
 from app.schemas import ChatRequest
 from app.services.backend_readiness_service import ensure_backend_ready
+from app.services.github_oauth_service import GitHubOAuthError
+from app.services.gitlab_oauth_service import GitLabOAuthError
 from app.services.pending_actions_service import create_pending_action_record
 from app.services.vllm_service import call_vllm, vllm_token_stream
 from app.tools.dispatch import FUNCS, call_tool
 from app.tools.repo_tools import REPO_RISKY_TOOLS, REPO_TOOL_DEFINITIONS
 from app.tools.web_search import WEB_SEARCH_TOOL_DEFINITION
-
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
@@ -106,7 +109,7 @@ async def chat_completions(body: ChatRequest, request: Request, user: dict[str, 
 
                 try:
                     tool_result = await call_tool(name, args, user_id)
-                except Exception as exc:
+                except (GitHubOAuthError, GitLabOAuthError, ValueError, RuntimeError, OSError) as exc:
                     log_event(logging.ERROR, "tool_execution_failed", tool=name, error=str(exc), trace_id=trace_id)
                     tool_result = f"Tool execution failed: {exc}"
 

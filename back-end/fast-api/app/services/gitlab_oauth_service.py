@@ -27,6 +27,7 @@ class GitLabOAuthError(Exception):
 def _optional_nonempty_string(value: object) -> str | None:
     if not isinstance(value, str):
         return None
+
     value = value.strip()
     return value or None
 
@@ -34,6 +35,7 @@ def _optional_nonempty_string(value: object) -> str | None:
 def _token_expires_at(token_data: dict[str, Any]) -> int | None:
     """Calculate an absolute expiry only from a positive GitLab expires_in."""
     expires_in = token_data.get("expires_in")
+
     if isinstance(expires_in, bool):
         return None
 
@@ -46,6 +48,7 @@ def _token_expires_at(token_data: dict[str, Any]) -> int | None:
 
     if seconds <= 0:
         return None
+
     return int(time.time()) + seconds
 
 
@@ -57,6 +60,7 @@ async def exchange_gitlab_code(
     """Exchange a GitLab authorization code using backend-owned PKCE data."""
     if not isinstance(code, str) or not code.strip():
         raise GitLabOAuthError("GitLab authorization code is missing")
+
     if not isinstance(code_verifier, str) or not code_verifier.strip():
         raise GitLabOAuthError("GitLab PKCE verifier is missing")
 
@@ -80,11 +84,15 @@ async def exchange_gitlab_code(
         raise GitLabOAuthError("GitLab token exchange failed") from exc
 
     if not isinstance(data, dict):
-        raise GitLabOAuthError("GitLab token exchange returned an invalid response")
+        raise GitLabOAuthError(
+            "GitLab token exchange returned an invalid response"
+        )
 
     access_token = _optional_nonempty_string(data.get("access_token"))
     if access_token is None:
-        raise GitLabOAuthError("GitLab token exchange returned no access token")
+        raise GitLabOAuthError(
+            "GitLab token exchange returned no access token"
+        )
 
     return data
 
@@ -117,6 +125,7 @@ async def fetch_gitlab_username(
     username = _optional_nonempty_string(data.get("username"))
     if username is None:
         username = _optional_nonempty_string(data.get("nickname"))
+
     if username is None:
         raise GitLabOAuthError("GitLab user response has no username")
 
@@ -131,8 +140,10 @@ def _store_gitlab_integration(
     """Persist GitLab credentials only through Fernet-backed storage."""
     if not isinstance(user_id, str) or not user_id:
         raise GitLabOAuthError("OAuth state has no initiating user")
+
     if not isinstance(token_data, dict):
         raise GitLabOAuthError("GitLab token response is invalid")
+
     if not isinstance(username, str) or not username.strip():
         raise GitLabOAuthError("GitLab username is missing")
 
@@ -174,6 +185,27 @@ async def store_gitlab_integration(
     )
 
 
+def _load_gitlab_integration(user_id: str) -> dict[str, Any]:
+    """
+    Load public-safe GitLab metadata for authenticated status responses.
+
+    This method does not decrypt, return, or serialize credentials, ciphertext,
+    expiry metadata, or scopes.
+    """
+    with db_session() as db:
+        status = integrations_repository.get_public_status_by_user_and_provider(
+            db,
+            user_id=user_id,
+            provider=GITLAB_PROVIDER,
+        )
+
+    return {
+        "connected": status.connected,
+        "username": status.username,
+        "connected_at": status.connected_at,
+    }
+
+
 def _load_gitlab_access_token(user_id: str) -> str:
     """Decrypt a GitLab token only immediately before an internal tool call."""
     with db_session() as db:
@@ -187,14 +219,71 @@ def _load_gitlab_access_token(user_id: str) -> str:
 
     if not isinstance(access_token, str) or not access_token:
         raise IntegrationNotFoundError("GitLab integration is not connected")
+
     return access_token
+
+
+def _delete_gitlab_integration(user_id: str) -> bool:
+    """
+    Delete only one user's local encrypted GitLab integration row.
+
+    This does not represent GitLab-side OAuth token revocation.
+    """
+    with db_session() as db:
+        return integrations_repository.delete_by_user_and_provider(
+            db,
+            user_id=user_id,
+            provider=GITLAB_PROVIDER,
+        )
+
+
+async def get_user_integration(
+    user_id: str,
+    provider: str,
+) -> dict[str, Any]:
+    """Return safe GitLab connection metadata only."""
+    if provider != GITLAB_PROVIDER:
+        raise GitLabOAuthError("Unsupported integration provider")
+
+    try:
+        return await asyncio.to_thread(_load_gitlab_integration, user_id)
+    except (
+        IntegrationNotFoundError,
+        TokenEncryptionError,
+        SQLAlchemyError,
+    ) as exc:
+        raise GitLabOAuthError(
+            "GitLab integration metadata is unavailable"
+        ) from exc
 
 
 async def get_gitlab_access_token(user_id: str) -> str:
     """Return GitLab credentials only to authenticated backend tool dispatch."""
     try:
         return await asyncio.to_thread(_load_gitlab_access_token, user_id)
-    except (IntegrationNotFoundError, TokenEncryptionError, SQLAlchemyError) as exc:
+    except (
+        IntegrationNotFoundError,
+        TokenEncryptionError,
+        SQLAlchemyError,
+    ) as exc:
         raise GitLabOAuthError(
             "GitLab integration credentials are unavailable"
+        ) from exc
+
+
+async def delete_user_integration(user_id: str, provider: str) -> bool:
+    """
+    Remove the authenticated user's local GitLab integration record.
+
+    The provider parameter preserves parity with the existing GitHub service
+    and allows the action route to dispatch without passing credentials.
+    """
+    if provider != GITLAB_PROVIDER:
+        return False
+
+    try:
+        return await asyncio.to_thread(_delete_gitlab_integration, user_id)
+    except SQLAlchemyError as exc:
+        raise GitLabOAuthError(
+            "GitLab integration deletion failed"
         ) from exc

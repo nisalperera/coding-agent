@@ -25,12 +25,16 @@ from app.db.integration_oauth_state_repository import (
     consume_integration_oauth_state,
     save_integration_oauth_state,
 )
+from app.schemas import IntegrationsStatusResponse
 from app.services.github_oauth_service import (
     GITHUB_PROVIDER,
     GitHubOAuthError,
     exchange_github_code,
     fetch_github_username,
     store_github_integration,
+)
+from app.services.github_oauth_service import (
+    get_user_integration as get_github_user_integration,
 )
 from app.services.gitlab_oauth_service import (
     GITLAB_PROVIDER,
@@ -39,9 +43,15 @@ from app.services.gitlab_oauth_service import (
     fetch_gitlab_username,
     store_gitlab_integration,
 )
+from app.services.gitlab_oauth_service import (
+    get_user_integration as get_gitlab_user_integration,
+)
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
-
+integration_status_router = APIRouter(
+    prefix="/v1/integrations",
+    tags=["integrations"],
+)
 
 GITHUB_CALLBACK_COOKIE_NAME = "github_integration_oauth"
 GITHUB_CALLBACK_COOKIE_PATH = "/v1/auth/github"
@@ -495,3 +505,49 @@ async def gitlab_callback(
         return _gitlab_callback_redirect(connected=False)
 
     return _gitlab_callback_redirect(connected=True)
+
+@integration_status_router.get(
+    "/status",
+    response_model=IntegrationsStatusResponse,
+)
+async def integration_status(
+    user: dict[str, Any] = Depends(current_user),
+) -> IntegrationsStatusResponse:
+    """
+    Return safe, stable integration metadata for the authenticated user.
+
+    Both supported providers are always included. This route never decrypts,
+    returns, logs, or derives output from provider access tokens, refresh
+    tokens, ciphertext, expiry, scopes, OAuth state, callback nonces,
+    authorization codes, PKCE verifiers, or OAuth client configuration.
+    """
+    user_id = user.get("user_id")
+    if not isinstance(user_id, str) or not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user is invalid",
+        )
+
+    try:
+        github_status, gitlab_status = await asyncio.gather(
+            get_github_user_integration(
+                user_id=user_id,
+                provider=GITHUB_PROVIDER,
+            ),
+            get_gitlab_user_integration(
+                user_id=user_id,
+                provider=GITLAB_PROVIDER,
+            ),
+        )
+    except (GitHubOAuthError, GitLabOAuthError):
+        raise HTTPException(
+            status_code=503,
+            detail="Integration status is unavailable",
+        ) from None
+
+    return IntegrationsStatusResponse(
+        integrations={
+            GITHUB_PROVIDER: github_status,
+            GITLAB_PROVIDER: gitlab_status,
+        }
+    )
