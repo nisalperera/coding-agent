@@ -38,7 +38,6 @@ def _validate_http_url(name: str, value: str, *, allow_local_http: bool = False)
         raise RuntimeError(f"{name} must be an absolute HTTP(S) URL")
 
     hostname = (parsed.hostname or "").lower()
-    print(name, hostname)
     is_local = hostname in {"localhost", "127.0.0.1", "::1"}
     if parsed.scheme != "https" and not (allow_local_http and is_local):
         raise RuntimeError(f"{name} must use HTTPS outside local development")

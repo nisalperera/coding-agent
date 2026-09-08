@@ -1,14 +1,9 @@
-"""GitLab OAuth App user-to-server token exchange and MySQL integration storage.
+"""Backend-only GitLab OAuth exchange, encrypted storage, and token dispatch."""
 
-Mirrors app/services/github_oauth_service.py exactly: exchange the
-authorization code server-side, fetch the authenticated GitLab user, store
-the token as Fernet ciphertext via the existing integrations repository,
-expose connection metadata only, and decrypt the token only immediately
-before an outbound GitLab API call.
-"""
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 import httpx
@@ -22,40 +17,75 @@ from app.db.integrations_repository import (
     integrations_repository,
 )
 
+GITLAB_PROVIDER = "gitlab"
+
 
 class GitLabOAuthError(Exception):
-    """Raised when the GitLab OAuth exchange or provider profile lookup fails."""
+    """Safe internal GitLab OAuth or integration failure."""
+
+
+def _optional_nonempty_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _token_expires_at(token_data: dict[str, Any]) -> int | None:
+    """Calculate an absolute expiry only from a positive GitLab expires_in."""
+    expires_in = token_data.get("expires_in")
+    if isinstance(expires_in, bool):
+        return None
+
+    if isinstance(expires_in, int):
+        seconds = expires_in
+    elif isinstance(expires_in, str) and expires_in.isdecimal():
+        seconds = int(expires_in)
+    else:
+        return None
+
+    if seconds <= 0:
+        return None
+    return int(time.time()) + seconds
 
 
 async def exchange_gitlab_code(
     client: httpx.AsyncClient,
     code: str,
-    redirect_uri: str,
+    code_verifier: str,
 ) -> dict[str, Any]:
-    """Exchange a GitLab authorization code for an OAuth token response."""
-    response = await client.post(
-        settings.GITLAB_TOKEN_URL,
-        headers={"Accept": "application/json"},
-        data={
-            "client_id": settings.GITLAB_OAUTH_CLIENT_ID,
-            "client_secret": settings.GITLAB_OAUTH_CLIENT_SECRET,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-        },
-    )
-    response.raise_for_status()
+    """Exchange a GitLab authorization code using backend-owned PKCE data."""
+    if not isinstance(code, str) or not code.strip():
+        raise GitLabOAuthError("GitLab authorization code is missing")
+    if not isinstance(code_verifier, str) or not code_verifier.strip():
+        raise GitLabOAuthError("GitLab PKCE verifier is missing")
 
-    data = response.json()
-    if not isinstance(data, dict) or not data.get("access_token"):
-        raise GitLabOAuthError(
-            data.get(
-                "error_description",
-                data.get("error", "GitLab token exchange failed"),
-            )
-            if isinstance(data, dict)
-            else "GitLab token exchange returned an invalid response"
+    try:
+        response = await client.post(
+            settings.GITLAB_TOKEN_URL,
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": settings.GITLAB_OAUTH_CLIENT_ID,
+                "client_secret": settings.GITLAB_OAUTH_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": settings.GITLAB_OAUTH_REDIRECT_URI,
+                "code_verifier": code_verifier,
+            },
+            timeout=10.0,
         )
+        response.raise_for_status()
+        data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise GitLabOAuthError("GitLab token exchange failed") from exc
+
+    if not isinstance(data, dict):
+        raise GitLabOAuthError("GitLab token exchange returned an invalid response")
+
+    access_token = _optional_nonempty_string(data.get("access_token"))
+    if access_token is None:
+        raise GitLabOAuthError("GitLab token exchange returned no access token")
+
     return data
 
 
@@ -63,130 +93,108 @@ async def fetch_gitlab_username(
     client: httpx.AsyncClient,
     access_token: str,
 ) -> str:
-    """Fetch the authenticated GitLab username for a freshly exchanged token."""
-    response = await client.get(
-        settings.GITLAB_USER_URL,
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-    response.raise_for_status()
+    """Fetch a GitLab username with a backend-only bearer token."""
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise GitLabOAuthError("GitLab access token is missing")
 
-    username = response.json().get("username")
-    if not isinstance(username, str) or not username:
-        raise GitLabOAuthError("Could not fetch GitLab user profile")
+    try:
+        response = await client.get(
+            settings.GITLAB_USER_URL,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise GitLabOAuthError("GitLab user lookup failed") from exc
+
+    if not isinstance(data, dict):
+        raise GitLabOAuthError("GitLab user response is malformed")
+
+    username = _optional_nonempty_string(data.get("username"))
+    if username is None:
+        username = _optional_nonempty_string(data.get("nickname"))
+    if username is None:
+        raise GitLabOAuthError("GitLab user response has no username")
+
     return username
 
 
 def _store_gitlab_integration(
     user_id: str,
-    access_token: str,
+    token_data: dict[str, Any],
     username: str,
 ) -> None:
-    """Persist the GitLab token as Fernet ciphertext in MySQL."""
-    with db_session() as db:
-        integrations_repository.create_or_update(
-            db,
-            user_id=user_id,
-            provider="gitlab",
-            access_token=access_token,
-            username=username,
-        )
+    """Persist GitLab credentials only through Fernet-backed storage."""
+    if not isinstance(user_id, str) or not user_id:
+        raise GitLabOAuthError("OAuth state has no initiating user")
+    if not isinstance(token_data, dict):
+        raise GitLabOAuthError("GitLab token response is invalid")
+    if not isinstance(username, str) or not username.strip():
+        raise GitLabOAuthError("GitLab username is missing")
+
+    access_token = _optional_nonempty_string(token_data.get("access_token"))
+    if access_token is None:
+        raise GitLabOAuthError("GitLab access token is missing")
+
+    refresh_token = _optional_nonempty_string(token_data.get("refresh_token"))
+    scopes = _optional_nonempty_string(token_data.get("scope"))
+
+    try:
+        with db_session() as db:
+            integrations_repository.create_or_update(
+                db,
+                user_id=user_id,
+                provider=GITLAB_PROVIDER,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                token_expires_at=_token_expires_at(token_data),
+                username=username.strip(),
+                scopes=scopes,
+            )
+    except (TokenEncryptionError, SQLAlchemyError, ValueError) as exc:
+        raise GitLabOAuthError("GitLab integration storage failed") from exc
 
 
-
-def _load_gitlab_integration(user_id: str) -> dict[str, Any]:
-    """Load non-secret GitLab connection metadata for internal status checks."""
-    with db_session() as db:
-        status = integrations_repository.get_public_status_by_user_and_provider(
-            db,
-            user_id=user_id,
-            provider="gitlab",
-        )
-
-        return {
-            "connected": status.connected,
-            "username": status.username,
-            "connected_at": status.connected_at,
-        }
+async def store_gitlab_integration(
+    *,
+    user_id: str,
+    token_data: dict[str, Any],
+    username: str,
+) -> None:
+    """Persist encrypted GitLab integration data from consumed OAuth state."""
+    await asyncio.to_thread(
+        _store_gitlab_integration,
+        user_id,
+        token_data,
+        username,
+    )
 
 
 def _load_gitlab_access_token(user_id: str) -> str:
-    """Decrypt an access token only immediately before an outbound GitLab call."""
+    """Decrypt a GitLab token only immediately before an internal tool call."""
     with db_session() as db:
-        access_token, _ = (
+        access_token, _refresh_token = (
             integrations_repository.get_decrypted_tokens_for_provider(
                 db,
                 user_id=user_id,
-                provider="gitlab",
+                provider=GITLAB_PROVIDER,
             )
         )
-        return access_token
 
-
-def _delete_gitlab_integration(user_id: str) -> bool:
-    """Remove a GitLab connection and its encrypted token ciphertext."""
-    with db_session() as db:
-        return integrations_repository.delete_by_user_and_provider(
-            db,
-            user_id=user_id,
-            provider="gitlab",
-        )
-
-
-async def get_user_integration(
-    user_id: str,
-    provider: str,
-) -> dict[str, Any]:
-    """Return connection metadata only; no token or ciphertext is exposed."""
-    return await asyncio.to_thread(_load_gitlab_integration, user_id)
+    if not isinstance(access_token, str) or not access_token:
+        raise IntegrationNotFoundError("GitLab integration is not connected")
+    return access_token
 
 
 async def get_gitlab_access_token(user_id: str) -> str:
-    """Return a token only for use by the GitLab provider client."""
+    """Return GitLab credentials only to authenticated backend tool dispatch."""
     try:
         return await asyncio.to_thread(_load_gitlab_access_token, user_id)
-    except (IntegrationNotFoundError, TokenEncryptionError) as exc:
-        raise GitLabOAuthError("GitLab integration credentials are unavailable") from exc
-
-
-async def delete_user_integration(user_id: str, provider: str) -> bool:
-    """Disconnect GitLab by deleting the MySQL integration row."""
-    if provider != "gitlab":
-        return False
-    return await asyncio.to_thread(_delete_gitlab_integration, user_id)
-
-
-async def handle_gitlab_oauth_callback(
-    client: httpx.AsyncClient,
-    body: dict[str, Any],
-    user_id: str,
-) -> tuple[int, dict[str, Any]]:
-    """Exchange the callback code, fetch username, and encrypt token at rest."""
-    code = body.get("code")
-    redirect_uri = body.get("redirect_uri")
-
-    if not isinstance(code, str) or not code:
-        return 400, {"error": "missing_gitlab_oauth_code"}
-
-    if not isinstance(redirect_uri, str) or not redirect_uri:
-        return 400, {"error": "missing_gitlab_oauth_redirect_uri"}
-
-    try:
-        token_data = await exchange_gitlab_code(client, code, redirect_uri)
-        access_token = token_data["access_token"]
-        username = await fetch_gitlab_username(client, access_token)
-        await asyncio.to_thread(
-            _store_gitlab_integration,
-            user_id,
-            access_token,
-            username,
-        )
-    except (GitLabOAuthError, httpx.HTTPError):
-        return 400, {"error": "gitlab_oauth_failed"}
-    except (TokenEncryptionError, SQLAlchemyError):
-        return 500, {"error": "gitlab_integration_storage_failed"}
-
-    return 200, {
-        "connected": True,
-        "provider": "gitlab",
-        "username": username,
-    }
+    except (IntegrationNotFoundError, TokenEncryptionError, SQLAlchemyError) as exc:
+        raise GitLabOAuthError(
+            "GitLab integration credentials are unavailable"
+        ) from exc

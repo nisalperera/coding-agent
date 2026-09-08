@@ -370,32 +370,3 @@ def test_github_callback_redirect_never_reflects_callback_values(
     assert "sensitive-text" not in response.headers["location"]
     assert "attacker-controlled-state" not in response.headers["location"]
     assert f"integration={GITHUB_PROVIDER}" in response.headers["location"]
-
-
-def test_debug_github_oauth_settings() -> None:
-    from app.core.config import settings
-
-    names = (
-        "APP_ENV",
-        "INTEGRATIONS_ENABLED",
-        "FRONTEND_ORIGIN",
-        "COOKIE_SECURE",
-        "GITHUB_AUTHORIZE_URL",
-        "GITHUB_TOKEN_URL",
-        "GITHUB_USER_URL",
-        "GITHUB_OAUTH_REDIRECT_URI",
-        "GITHUB_OAUTH_SCOPES",
-        "INTEGRATION_OAUTH_STATE_COOKIE_SALT",
-        "INTEGRATION_OAUTH_STATE_TTL_S",
-    )
-
-    for name in names:
-        print(f"{name}: {getattr(settings, name, '<MISSING>')!r}")
-
-    for name in (
-        "SESSION_SECRET",
-        "GITHUB_OAUTH_CLIENT_ID",
-        "GITHUB_OAUTH_CLIENT_SECRET",
-    ):
-        value = getattr(settings, name, None)
-        print(f"{name}_PRESENT: {isinstance(value, str) and bool(value.strip())}")

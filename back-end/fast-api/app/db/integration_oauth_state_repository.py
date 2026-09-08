@@ -74,7 +74,7 @@ def save_integration_oauth_state(
 def consume_integration_oauth_state(
     *,
     state: str,
-        expected_provider: str,
+    expected_provider: str,
     cookie_nonce: str,
 ) -> ConsumedIntegrationOAuthState | None:
     """Atomically validate and consume a provider OAuth callback state.
