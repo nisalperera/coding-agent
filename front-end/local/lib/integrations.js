@@ -19,69 +19,94 @@ import { apiFetch, ApiError } from './api';
 import { APP_CONFIG } from './config';
 
 const BACKEND_URL = APP_CONFIG.BACKEND_URL;
+const PROVIDERS = new Set(['github', 'gitlab']);
 
-/** Full-page redirect to the backend-owned GitHub OAuth login endpoint. */
+function emptyProviderStatus() {
+  return {
+    connected: false,
+    username: null,
+    connectedAt: null,
+  };
+}
+
+function normalizeProviderStatus(provider) {
+  return {
+    connected: Boolean(provider?.connected),
+    username: typeof provider?.username === 'string' && provider.username.trim()
+      ? provider.username.trim()
+      : null,
+    connectedAt: Number.isFinite(provider?.connected_at)
+      ? provider.connected_at
+      : null,
+  };
+}
+
+function normalizeStatusPayload(payload) {
+  const integrations = payload?.integrations ?? payload ?? {};
+
+  return {
+    github: normalizeProviderStatus(integrations.github),
+    gitlab: normalizeProviderStatus(integrations.gitlab),
+  };
+}
+
+function assertProvider(provider) {
+  if (!PROVIDERS.has(provider)) {
+    throw new Error('Unsupported integration provider.');
+  }
+}
+
 export function connectGitHub() {
-  window.location.href = `${BACKEND_URL}/v1/auth/github/login`;
+  window.location.assign(`${BACKEND_URL}/v1/auth/github/login`);
 }
 
-/** Full-page redirect to the backend-owned GitLab OAuth login endpoint. */
 export function connectGitLab() {
-  window.location.href = `${BACKEND_URL}/v1/auth/gitlab/login`;
+  window.location.assign(`${BACKEND_URL}/v1/auth/gitlab/login`);
 }
 
-/**
- * Reads integration state from the backend, the source of truth now that
- * neither provider token is kept in browser storage. Expected response:
- * {
- *   github: { connected: boolean, username?: string },
- *   gitlab: { connected: boolean }
- * }
- */
 export async function getIntegrationsStatus() {
+  const payload = await apiFetch('/v1/integrations/status');
+  return normalizeStatusPayload(payload);
+}
+
+export async function disconnectIntegration(provider) {
+  assertProvider(provider);
+
   try {
-    const data = await apiFetch('/v1/integrations/status');
+    await apiFetch('/v1/actions', {
+      method: 'POST',
+      body: {
+        action: 'disconnect_integration',
+        provider,
+      },
+    });
+
     return {
-      github: {
-        connected: Boolean(data?.github?.connected),
-        username: data?.github?.username ?? '',
-      },
-      gitlab: {
-        connected: Boolean(data?.gitlab?.connected),
-      },
+      ok: true,
+      status: emptyProviderStatus(),
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof ApiError && [401, 403].includes(error.status)) {
+      return {
+        ok: false,
+        reason: 'unauthenticated',
+      };
+    }
+
     return {
-      github: { connected: false, username: '' },
-      gitlab: { connected: false },
+      ok: false,
+      reason: 'request_failed',
     };
   }
 }
 
-/** Revokes GitHub's backend-stored integration token. */
-export async function disconnectGitHub() {
-  try {
-    await apiFetch('/v1/actions', {
-      method: 'POST',
-      body: { action: 'disconnect_integration', provider: 'github' },
-    });
-    return { ok: true, message: 'GitHub disconnected.' };
-  } catch (err) {
-    const detail = err instanceof ApiError ? err.message : String(err);
-    return { ok: false, message: `Could not disconnect GitHub (${detail}).` };
+export function formatConnectedAt(epochSeconds) {
+  if (!Number.isFinite(epochSeconds)) {
+    return null;
   }
-}
 
-/** Revokes GitLab's backend-stored integration token. */
-export async function disconnectGitLab() {
-  try {
-    await apiFetch('/v1/actions', {
-      method: 'POST',
-      body: { action: 'disconnect_integration', provider: 'gitlab' },
-    });
-    return { ok: true, message: 'GitLab disconnected.' };
-  } catch (err) {
-    const detail = err instanceof ApiError ? err.message : String(err);
-    return { ok: false, message: `Could not disconnect GitLab (${detail}).` };
-  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(epochSeconds * 1000));
 }

@@ -8,64 +8,128 @@ import Composer from '../components/Composer';
 import IntegrationsModal from '../components/IntegrationsModal';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../hooks/useTheme';
-import { useIntegrations } from '../hooks/useIntegrations';
 import { useAttachments } from '../hooks/useAttachments';
 import { useChat } from '../hooks/useChat';
+import { getIntegrationsStatus } from '../lib/integrations';
+import { use } from 'marked';
+
+const EMPTY_INTEGRATIONS = {
+    github: {
+        connected: false,
+        username: null,
+        connectedAt: null,
+    },
+    gitlab: {
+        connected: false,
+        username: null,
+        connectedAt: null,
+    },
+};
 
 export default function Page() {
-  const [integrationsOpen, setIntegrationsOpen] = useState(false);
 
-  const { messages, loading, send, appendMessage, resolveConfirmation } = useChat();
-  const auth = useAuth();
-  const theme = useTheme();
+    const auth = useAuth();
+    const { loginWithGoogle, user } = auth;
+    
+    const theme = useTheme();
 
-  const onIntegrationMessage = useCallback((message) => appendMessage('assistant', message), [appendMessage]);
-  const integrations = useIntegrations(onIntegrationMessage);
+    const {
+        messages,
+        loading,
+        send,
+        appendMessage,
+        resolveConfirmation,
+    } = useChat();
 
-  const onAttachmentWarning = useCallback((message) => appendMessage('assistant', message), [appendMessage]);
-  const attachmentsState = useAttachments(onAttachmentWarning);
+    const [integrationsOpen, setIntegrationsOpen] = useState(false);
+    const [integrations, setIntegrations] = useState(EMPTY_INTEGRATIONS);
+    const [integrationsLoading, setIntegrationsLoading] = useState(false);
+    const [integrationsError, setIntegrationsError] = useState(false);
 
-  useEffect(() => {
-    const pending = sessionStorage.getItem('pending_integration_message');
-    if (pending) {
-      sessionStorage.removeItem('pending_integration_message');
-      appendMessage('assistant', pending);
-    }
-    integrations.refresh();
-    document.getElementById('input')?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const onAttachmentWarning = useCallback(
+        (message) => appendMessage('assistant', message),
+        [appendMessage],
+    );
 
-  return (
-    <>
-      <Header
-        auth={auth}
-        integrations={integrations}
-        onOpenIntegrations={() => setIntegrationsOpen(true)}
-        theme={theme}
-      />
+    const attachmentsState = useAttachments(onAttachmentWarning);
 
-      <ChatLog
-        messages={messages}
-        onResolveConfirmation={resolveConfirmation}
-        dragProps={{
-          onDragEnter: attachmentsState.onDragEnter,
-          onDragOver: attachmentsState.onDragOver,
-          onDragLeave: attachmentsState.onDragLeave,
-          onDrop: attachmentsState.onDrop,
-        }}
-        dragActive={attachmentsState.dragActive}
-      />
+    const refreshIntegrations = useCallback(async () => {
+        if (!user) {
+            setIntegrations(EMPTY_INTEGRATIONS);
+            setIntegrationsError(false);
+            return;
+        }
 
-      <TypingIndicator visible={loading} />
+        setIntegrationsLoading(true);
+        setIntegrationsError(false);
 
-      <Composer attachmentsState={attachmentsState} onSend={send} loading={loading} />
+        try {
+            const status = await getIntegrationsStatus();
+            setIntegrations(status);
+        } catch {
+            setIntegrationsError(true);
+        } finally {
+            setIntegrationsLoading(false);
+        }
+    }, [user]);
 
-      <IntegrationsModal
-        open={integrationsOpen}
-        onClose={() => setIntegrationsOpen(false)}
-        integrations={integrations}
-      />
-    </>
-  );
+    useEffect(() => {
+        document.getElementById('input')?.focus();
+    }, []);
+
+    useEffect(() => {
+        if (user) {
+            refreshIntegrations();
+            return;
+        }
+
+        setIntegrations(EMPTY_INTEGRATIONS);
+        setIntegrationsError(false);
+    }, [user, refreshIntegrations]);
+
+    const handleUnauthenticatedIntegrationRequest = useCallback(() => {
+        setIntegrationsOpen(false);
+        loginWithGoogle();
+    }, [loginWithGoogle]);
+
+    return (
+        <>
+            <Header
+                auth={auth}
+                integrations={integrations}
+                onOpenIntegrations={() => setIntegrationsOpen(true)}
+                theme={theme}
+            />
+
+            <ChatLog
+                messages={messages}
+                onResolveConfirmation={resolveConfirmation}
+                dragProps={{
+                    onDragEnter: attachmentsState.onDragEnter,
+                    onDragOver: attachmentsState.onDragOver,
+                    onDragLeave: attachmentsState.onDragLeave,
+                    onDrop: attachmentsState.onDrop,
+                }}
+                dragActive={attachmentsState.dragActive}
+            />
+
+            <TypingIndicator visible={loading} />
+
+            <Composer
+                attachmentsState={attachmentsState}
+                onSend={send}
+                loading={loading}
+            />
+
+            <IntegrationsModal
+                open={integrationsOpen}
+                onClose={() => setIntegrationsOpen(false)}
+                integrations={integrations}
+                loading={integrationsLoading}
+                error={integrationsError}
+                onRefresh={refreshIntegrations}
+                onUnauthenticated={handleUnauthenticatedIntegrationRequest}
+            />
+        </>
+    );
 }

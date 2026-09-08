@@ -1,6 +1,6 @@
 'use client';
 
-import { setSessionToken, apiFetch, ApiError } from './api';
+import { apiFetch, ApiError } from './api';
 import { APP_CONFIG } from './config';
 
 const BACKEND_URL = APP_CONFIG.BACKEND_URL;
