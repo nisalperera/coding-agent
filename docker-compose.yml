@@ -1,66 +1,70 @@
 services:
-    # vllm-model:
-    #     build: ./vllm-model
-    #     container_name: vllm-model
-    #     ports:
-    #         - "8000:8000"
-    #     deploy:
-    #         resources:
-    #             reservations:
-    #             devices:
-    #                 - driver: nvidia
-    #                   count: all
-    #                   capabilities: [ gpu ]
-    #     volumes:
-    #         - ./vllm-model/huggingface:/root/.cache/huggingface
-
-    backend:
-        build: ./back-end/fast-api
-        container_name: backend
-        ports:
-            - "8000:8000"
-        volumes:
-            - ./back-end/fast-api:/code
-        env_file:
-            - ./back-end/fast-api/.env
-
-    frontend:
-        build:
-            context: ./front-end/local
-            dockerfile: Dockerfile
-            args:
-                NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://backend:8000}
-        container_name: frontend
-        ports:
-            - "3000:3000"
-        env_file:
-            - ./front-end/local/.env
-        depends_on:
-            - mysql
-            # - backend
-
     mysql:
         image: mysql:8.4
         container_name: coding-agent-mysql
         restart: unless-stopped
-        environment:
-            MYSQL_DATABASE: ${MYSQL_DATABASE:-coding_agent}
-            MYSQL_USER: ${MYSQL_USER:-coding_agent}
-            MYSQL_PASSWORD: ${MYSQL_PASSWORD:-coding_agent}
-            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-coding_agent}
-        ports:
-            - "${MYSQL_HOST_PORT:-3306}:3306"
-        volumes:
-            - mysql_data:/var/lib/mysql
-        healthcheck:
-            test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent" ]
-            interval: 10s
-            timeout: 5s
-            retries: 12
-            start_period: 30s
+        env_file:
+            - ./.env
         command:
             - --character-set-server=utf8mb4
             - --collation-server=utf8mb4_unicode_ci
+            - --default-storage-engine=INNODB
+        volumes:
+            - mysql_data:/var/lib/mysql
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - mysqladmin ping -h 127.0.0.1 -u root -p"$${MYSQL_ROOT_PASSWORD}" --silent
+            interval: 5s
+            timeout: 5s
+            retries: 30
+            start_period: 30s
+        network_mode: host
+
+    migrate:
+        build:
+            context: ./back-end/fast-api
+        env_file:
+            - ./back-end/fast-api/.env
+        command: [ "alembic", "upgrade", "head" ]
+        depends_on:
+            mysql:
+                condition: service_healthy
+        restart: "no"
+        network_mode: host
+
+    backend:
+        build:
+            context: ./back-end/fast-api
+        container_name: backend
+        env_file:
+            - ./back-end/fast-api/.env
+        ports:
+            - "8000:8000"
+        volumes:
+            - ./back-end/fast-api:/code
+        depends_on:
+            mysql:
+                condition: service_healthy
+            migrate:
+                condition: service_completed_successfully
+        network_mode: host
+
+    frontend:
+        build:
+            context: ./front-end/next-js
+            dockerfile: Dockerfile
+            args:
+                NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
+        container_name: frontend
+        ports:
+            - "3000:3000"
+        env_file:
+            - ./front-end/next-js/.env
+        depends_on:
+            backend:
+                condition: service_started
+        network_mode: host
 
 volumes:
     mysql_data:

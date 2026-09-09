@@ -11,10 +11,12 @@ COPY ./requirements.txt /code/requirements.txt
 RUN pip install --no-cache-dir -r /code/requirements.txt
 
 # Copy the application code
-COPY ./app /code/app
-COPY ./main.py /code/main.py
+COPY app /code/app
+COPY alembic /code/alembic
+COPY alembic.ini /code/alembic.ini
+COPY main.py /code/main.py
 
 EXPOSE 8000
 
 # Run the FastAPI application using the official 'fastapi run' command
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
