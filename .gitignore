@@ -218,3 +218,5 @@ __marimo__/
 .streamlit/secrets.toml
 # back-end/fast-api/data/app.db
 back-end/fast-api/data/*.db
+
+vllm-model/huggingface/

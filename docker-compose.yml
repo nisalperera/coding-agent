@@ -33,6 +33,33 @@ services:
         restart: "no"
         network_mode: host
 
+    vllm:
+        build:
+            context: ./vllm-model
+        image: vllm/vllm-openai:v0.10.2
+        container_name: coding-agent-vllm
+        restart: unless-stopped
+        network_mode: host
+        env_file:
+            - vllm-model/.env
+        volumes:
+            - ./vllm-model/huggingface:/root/.cache/huggingface
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: 1
+                          capabilities: [gpu]
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - curl -f http://127.0.0.1:9000/health || exit 1
+            interval: 10s
+            timeout: 5s
+            retries: 30
+            start_period: 120s
+
     backend:
         build:
             context: ./back-end/fast-api
@@ -48,6 +75,8 @@ services:
                 condition: service_healthy
             migrate:
                 condition: service_completed_successfully
+            vllm:
+                condition: service_healthy
         network_mode: host
 
     frontend:

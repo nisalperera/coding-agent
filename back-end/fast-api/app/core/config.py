@@ -148,9 +148,9 @@ class Settings:
     )
     OAUTH_STATE_COOKIE_NAME = "google_oauth_state"
 
-    VLLM_ENDPOINT = "http://127.0.0.1:8001/v1/chat/completions"
-    VLLM_HEALTH_ENDPOINT = "http://127.0.0.1:8001/health"
-    MODEL_NAME = "local-model"
+    VLLM_ENDPOINT = "http://localhost:9000/v1/chat/completions"
+    VLLM_HEALTH_ENDPOINT = "http://localhost:9000/health"
+    MODEL_NAME = "Qwen/Qwen2.5-Coder-14B-Instruct"
     STARTUP_BUDGET_S = 120
     POLL_INTERVAL_S = 2.0
     RETRY_AFTER_S = 60
@@ -167,6 +167,8 @@ class Settings:
     )
     GITHUB_TOKEN = ""
     GITLAB_TOKEN = ""
+
+    POST_LOGIN_REDIRECT_URL = _require("POST_LOGIN_REDIRECT_URL")
 
     @classmethod
     def validate(cls) -> None:
@@ -212,6 +214,7 @@ class Settings:
             "GITLAB_OAUTH_REDIRECT_URI",
             "VLLM_ENDPOINT",
             "VLLM_HEALTH_ENDPOINT",
+            "POST_LOGIN_REDIRECT_URL",
         ):
             value = getattr(cls, name)
             if value:

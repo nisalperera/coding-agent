@@ -15,7 +15,7 @@ from app.db.sessions_repository import get_session_user
 def _extract_token(request: Request, authorization: Optional[str]) -> Optional[str]:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization.split(" ", 1)[1].strip()
-    return request.cookies.get("agent_session")
+    return request.cookies.get("session")
 
 
 async def current_user(request: Request, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:

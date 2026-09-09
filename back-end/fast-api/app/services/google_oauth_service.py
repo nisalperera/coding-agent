@@ -78,7 +78,7 @@ async def build_login_redirect(request: Request) -> RedirectResponse:
     return response
 
 
-async def handle_callback(code: str, state: str, request: Request) -> JSONResponse:
+async def handle_callback(code: str, state: str, request: Request) -> RedirectResponse:
     raw_state_cookie = request.cookies.get(settings.OAUTH_STATE_COOKIE_NAME)
     if not raw_state_cookie:
         raise HTTPException(status_code=400, detail="Missing Google OAuth state cookie")
@@ -134,14 +134,14 @@ async def handle_callback(code: str, state: str, request: Request) -> JSONRespon
     user = await asyncio.to_thread(upsert_google_user_claims, claims)
     session_token = await asyncio.to_thread(create_session, user["user_id"])
 
-    response = JSONResponse({
-        "authenticated": True,
-        "user": user,
-        "access_token": session_token,
-        "token_type": "Bearer",
-        "expires_in": settings.SESSION_TTL_S,
-    })
-    response.delete_cookie(key=settings.OAUTH_STATE_COOKIE_NAME, path="/v1/auth/google")
+    response = RedirectResponse(
+        url=settings.POST_LOGIN_REDIRECT_URL,
+        status_code=303,
+    )
+    response.delete_cookie(
+        key=settings.OAUTH_STATE_COOKIE_NAME,
+        path="/v1/auth/google",
+    )
     response.set_cookie(
         key=settings.SESSION_COOKIE_NAME,
         value=session_token,

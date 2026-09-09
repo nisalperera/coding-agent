@@ -19,7 +19,11 @@ async def google_login(request: Request) -> RedirectResponse:
 
 
 @router.get("/google/callback")
-async def google_callback(request: Request, code: str = Query(...), state: str = Query(...)) -> JSONResponse:
+async def google_callback(
+    request: Request,
+    code: str = Query(...),
+    state: str = Query(...),
+) -> RedirectResponse:
     return await handle_callback(code, state, request)
 
 

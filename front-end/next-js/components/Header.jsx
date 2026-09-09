@@ -19,7 +19,7 @@ export default function Header({
                 <div className="flex min-w-0 items-center gap-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                        src="/public/images/logo.jpeg"
+                        src="/favicon.ico"
                         alt="Nisal's Coding Agent logo"
                         className="h-8 w-8 shrink-0 rounded-lg object-cover"
                     />

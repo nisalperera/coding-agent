@@ -23,6 +23,7 @@ class ChatRequest(BaseModel):
     message: str = ""
     history: list[dict[str, Any]] = Field(default_factory=list)
     conversation_id: str | None = None
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ActionRequest(BaseModel):
