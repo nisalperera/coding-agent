@@ -38,5 +38,5 @@ def set_auth_cookie(response: Response, token: str) -> None:
         path="/",
         secure=settings.COOKIE_SECURE,
         httponly=True,
-        samesite="strict",
+        samesite="lax",
     )

@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../hooks/useAuth";
+import { useTheme } from '../../components/ThemeProvider';
 import UserAvatar from "../../components/UserAvatar";
 
 export default function ProfilePage() {
     const router = useRouter();
     const { signedIn, user, loginWithGoogle, logout } = useAuth();
+    const { dark, toggleTheme } = useTheme();
 
     const name = user?.name ?? "Signed in user";
     const email = user?.email ?? "";
@@ -130,7 +132,7 @@ export default function ProfilePage() {
                         </p>
 
                         <p className="break-all text-sm text-slate-900 dark:text-slate-100">
-                            {image ? "Provided by your Google account" : "Using initials fallback"}
+                            {image ? "Provided by your Google account" : ""}
                         </p>
                     </div>
                 </div>

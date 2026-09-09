@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
-import { useTheme } from "../../hooks/useTheme";
+import { useTheme } from '../../components/ThemeProvider';
 
 const SETTINGS_STORAGE_KEY = "coding-agent-settings";
 

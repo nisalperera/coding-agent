@@ -42,7 +42,7 @@ async def generate_unique_username(
 
 
 async def check_if_user_exists(email: str) -> bool:
-    existing_user = get_user_by_email(email)  # Raises HTTPException if user exists
+    existing_user = await get_user_by_email(email)  # Raises HTTPException if user exists
     if existing_user:
         raise HTTPException(
             status_code=409,

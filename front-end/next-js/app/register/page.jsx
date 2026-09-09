@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useTheme } from "../../hooks/useTheme";
+import { useTheme } from '../../components/ThemeProvider';
 import { useAuth } from "../../hooks/useAuth";
 
 export default function RegisterPage() {
