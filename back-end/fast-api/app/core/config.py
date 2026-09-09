@@ -96,6 +96,10 @@ class Settings:
     DATABASE_POOL_RECYCLE_S: int = int(_optional("DATABASE_POOL_RECYCLE_S", "1800"))
     DATABASE_CONNECT_TIMEOUT_S: int = int(_optional("DATABASE_CONNECT_TIMEOUT_S", "10"))
 
+    JWT_SECRET = _require("JWT_SECRET")
+    JWT_ALGORITHM = _optional("JWT_ALGORITHM", "HS256")
+    JWT_EXPIRES_MINUTES = int(_optional("JWT_EXPIRES_MINUTES", "60"))
+
     FRONTEND_ORIGIN: str = _require("FRONTEND_ORIGIN")
     CORS_ALLOW_ORIGINS_RAW: str = _optional("CORS_ALLOW_ORIGINS", FRONTEND_ORIGIN)
     CORS_ALLOW_ORIGINS: list[str] = Field(default_factory=list)

@@ -3,12 +3,15 @@ import asyncio
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import Response, JSONResponse, RedirectResponse
 
+from app.schemas import RegisterRequest, LoginRequest, UserResponse
 from app.auth.dependencies import current_user
 from app.core.config import settings
 from app.db.sessions_repository import delete_session
 from app.services.google_oauth_service import build_login_redirect, handle_callback
+from app.services.uname_password_login_service import generate_unique_username, normalize_email
+from app.services.uname_password_login_service import check_if_user_exists, save_user, user_login
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -40,6 +43,36 @@ async def logout(request: Request, authorization: Optional[str] = Header(default
     response = JSONResponse({"logged_out": True})
     response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/")
     return response
+
+
+@router.post("/register", response_model=UserResponse, status_code=201)
+async def register(
+    payload: RegisterRequest,
+    response: Response,
+) -> UserResponse:
+    email = normalize_email(str(payload.email))
+
+    await check_if_user_exists(email)  # Raises HTTPException if user exists
+
+    username = await generate_unique_username(email)
+
+    user = await save_user(username, email, payload.name.strip(), payload.password, response)  # Raises HTTPException if user exists
+    return UserResponse(
+        user_id=user.user_id,
+        username=user.username,
+        name=user.name,
+        email=user.email,
+        email_verified=user.email_verified,
+        picture=user.picture,
+        auth_provider=user.auth_provider,
+    )
+
+@router.post("/login", response_model=UserResponse)
+async def login(
+    payload: LoginRequest,
+    response: Response,
+) -> UserResponse:
+    return await user_login(payload, response)
 
 
 @router.get("/me")

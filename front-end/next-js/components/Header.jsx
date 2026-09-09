@@ -1,4 +1,7 @@
-'use client';
+"use client";
+
+import ProfileMenu from "./ProfileMenu";
+import Link from "next/link";
 
 export default function Header({
     auth,
@@ -23,10 +26,12 @@ export default function Header({
                         alt="Nisal's Coding Agent logo"
                         className="h-8 w-8 shrink-0 rounded-lg object-cover"
                     />
+
                     <div className="min-w-0">
                         <h1 className="truncate text-sm font-semibold leading-tight">
                             Nisal&apos;s Coding Agent
                         </h1>
+
                         <p className="truncate text-xs text-slate-500 dark:text-slate-400">
                             Agentic AI &amp; RAG assistant
                         </p>
@@ -36,32 +41,23 @@ export default function Header({
                 <div id="auth-bar" className="flex items-center gap-2">
                     {!signedIn ? (
                         <div id="auth-signed-out" className="flex items-center gap-2">
-                            <button
-                                id="google-login-btn"
-                                type="button"
-                                onClick={loginWithGoogle}
-                                className="rounded-full border border-slate-300 px-3 py-1.5 text-xs transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800 sm:text-sm"
+                            <Link
+                                href="/login"
+                                className="rounded-full border border-slate-300 px-3 py-1.5 text-xs transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 sm:text-sm"
                             >
-                                Sign in with Google
-                            </button>
+                                Sign in
+                            </Link>
                         </div>
                     ) : (
                         <div
                             id="auth-signed-in"
                             className="flex flex-wrap items-center justify-end gap-2"
                         >
-                            <span
-                                id="user-email"
-                                className="hidden max-w-[8rem] truncate text-xs text-slate-500 dark:text-slate-400 sm:inline"
-                            >
-                                {user?.email ?? ''}
-                            </span>
-
                             <button
                                 id="github-auth-btn"
                                 type="button"
                                 onClick={onOpenIntegrations}
-                                className={`flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-1.5 text-xs text-white transition hover:opacity-90 dark:bg-white dark:text-slate-900 sm:text-sm ${githubConnected ? 'opacity-70' : ''
+                                className={`flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-1.5 text-xs text-white transition hover:opacity-90 dark:bg-white dark:text-slate-900 sm:text-sm ${githubConnected ? "opacity-70" : ""
                                     }`}
                             >
                                 <svg
@@ -73,10 +69,11 @@ export default function Header({
                                 >
                                     <path d="M12 .5C5.73.5.98 5.24.98 11.5c0 4.86 3.15 8.98 7.52 10.43.55.1.75-.24.75-.53v-2.06c-3.06.66-3.7-1.3-3.7-1.3-.5-1.27-1.22-1.6-1.22-1.6-1-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.68 2.57 1.2 3.2.91.1-.71.39-1.2.71-1.47-2.44-.28-5-1.22-5-5.42 0-1.2.43-2.18 1.13-2.95-.11-.28-.49-1.4.11-2.92 0 0 .93-.3 3.04 1.13a10.5 10.5 0 0 1 5.54 0c2.11-1.43 3.04-1.13 3.04-1.13.6 1.52.22 2.64.11 2.92.7.77 1.13 1.75 1.13 2.95 0 4.21-2.57 5.14-5.02 5.41.4.35.75 1.03.75 2.08v3.08c0 .29.2.64.76.53 4.36-1.46 7.51-5.58 7.51-10.43C23.02 5.24 18.27.5 12 .5Z" />
                                 </svg>
+
                                 <span id="github-auth-btn-label">
                                     {githubConnected
-                                        ? `GitHub ✓${githubUsername ? ` @${githubUsername}` : ''}`
-                                        : 'GitHub'}
+                                        ? `GitHub ✓${githubUsername ? ` @${githubUsername}` : ""}`
+                                        : "GitHub"}
                                 </span>
                             </button>
 
@@ -84,7 +81,7 @@ export default function Header({
                                 id="gitlab-auth-btn"
                                 type="button"
                                 onClick={onOpenIntegrations}
-                                className={`flex items-center gap-1.5 rounded-full bg-orange-600 px-3 py-1.5 text-xs text-white transition hover:bg-orange-700 sm:text-sm ${gitlabConnected ? 'opacity-70' : ''
+                                className={`flex items-center gap-1.5 rounded-full bg-orange-600 px-3 py-1.5 text-xs text-white transition hover:bg-orange-700 sm:text-sm ${gitlabConnected ? "opacity-70" : ""
                                     }`}
                             >
                                 <svg
@@ -95,13 +92,20 @@ export default function Header({
                                     aria-hidden="true"
                                 >
                                     <path d="M12 21.42 15.6 10.2H8.4L12 21.42Z" />
-                                    <path d="M4.2 10.2 2.4 15.6 12 21.42 4.2 10.2Z" opacity=".7" />
+                                    <path
+                                        d="M4.2 10.2 2.4 15.6 12 21.42 4.2 10.2Z"
+                                        opacity=".7"
+                                    />
                                     <path d="M4.2 10.2h4.2L6.6 4.02a.42.42 0 0 0-.8 0L4.2 10.2Z" />
-                                    <path d="M19.8 10.2l1.8 5.4L12 21.42 19.8 10.2Z" opacity=".7" />
+                                    <path
+                                        d="M19.8 10.2l1.8 5.4L12 21.42 19.8 10.2Z"
+                                        opacity=".7"
+                                    />
                                     <path d="M19.8 10.2h-4.2l1.8-6.18a.42.42 0 0 1 .8 0l1.6 6.18Z" />
                                 </svg>
+
                                 <span id="gitlab-auth-btn-label">
-                                    {gitlabConnected ? 'GitLab ✓' : 'GitLab'}
+                                    {gitlabConnected ? "GitLab ✓" : "GitLab"}
                                 </span>
                             </button>
 
@@ -113,7 +117,8 @@ export default function Header({
                                 className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-300 text-sm transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
                             >
                                 <span aria-hidden="true">🔗</span>
-                                {(githubConnected || gitlabConnected) ? (
+
+                                {githubConnected || gitlabConnected ? (
                                     <span
                                         id="integrations-dot"
                                         className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-emerald-500"
@@ -121,14 +126,7 @@ export default function Header({
                                 ) : null}
                             </button>
 
-                            <button
-                                id="logout-btn"
-                                type="button"
-                                onClick={logout}
-                                className="rounded-full border border-slate-300 px-3 py-1.5 text-xs transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800 sm:text-sm"
-                            >
-                                Log out
-                            </button>
+                            <ProfileMenu user={user} onLogout={logout} />
                         </div>
                     )}
 
@@ -139,7 +137,7 @@ export default function Header({
                         onClick={toggleTheme}
                         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-300 text-sm transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
                     >
-                        <span id="theme-icon">{dark ? '☀️' : '🌙'}</span>
+                        <span id="theme-icon">{dark ? "☀️" : "🌙"}</span>
                     </button>
                 </div>
             </div>

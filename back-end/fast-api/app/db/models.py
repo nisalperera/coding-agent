@@ -42,30 +42,75 @@ class User(Base):
         primary_key=True,
         default=new_uuid,
     )
-    google_sub: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    email: Mapped[str] = mapped_column(String(320), nullable=False)
-    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    picture: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
-    updated_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
-    sessions: Mapped[list[SessionRecord]] = relationship(
+    # Generated from the email local part during registration.
+    # Users do not submit this field in the frontend.
+    username: Mapped[str | None] = mapped_column(
+        String(64),
+        unique=True,
+        index=True,
+        nullable=True,
+    )
+
+    # Stores an Argon2id hash only. Never store a plaintext password.
+    password_hash: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+    )
+
+    email: Mapped[str] = mapped_column(
+        String(320),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    picture: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Nullable for users registered through email and password.
+    google_sub: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
+    auth_provider: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="google",
+    )
+
+    created_at: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False)
+
+    sessions: Mapped[list["SessionRecord"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    integrations: Mapped[list[UserIntegration]] = relationship(
+    integrations: Mapped[list["UserIntegration"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    pending_actions: Mapped[list[PendingAction]] = relationship(
+    pending_actions: Mapped[list["PendingAction"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    integration_oauth_states: Mapped[list[IntegrationOAuthState]] = relationship(
+    integration_oauth_states: Mapped[list["IntegrationOAuthState"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
         passive_deletes=True,

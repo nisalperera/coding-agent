@@ -10,3 +10,7 @@ alembic>=1.13,<2.0
 pymysql>=1.1,<2.0
 cryptography>=42,<46
 respx>=0.21,<1.0
+PyJWT
+pwdlib[argon2]
+email-validator
+pydantic-settings

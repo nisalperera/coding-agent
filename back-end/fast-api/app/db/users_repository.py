@@ -84,3 +84,51 @@ def get_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
             "name": user.name,
             "picture": user.picture,
         }
+
+async def get_user_by_email(email: str, return_password: bool = False) -> Optional[dict[str, Any]]:
+    with db_session() as session:
+        user = session.scalar(select(User).where(User.email == email))
+        if user is None:
+            return None
+
+        if return_password:
+            return {
+                "user_id": user.user_id,
+                "name": user.name,
+                "username": user.username,
+                "email": user.email,
+                "email_verified": user.email_verified,
+                "picture": user.picture,
+                "auth_provider": user.auth_provider,
+                "password_hash": user.password_hash,
+            }
+        return {
+            "user_id": user.user_id,
+            "email": user.email,
+            "name": user.name,
+            "picture": user.picture,
+        }
+
+def get_users_count_by_prefix(candidate: str) -> int:
+    with db_session() as session:
+        existing = session.scalar(
+            select(User.user_id).where(User.username.like(f"{candidate}-%"))
+        )
+    if existing is None:
+        return 0
+    return len(existing)
+
+async def put_user(user: User) -> User:
+    with db_session() as session:
+        session.add(user)
+        try:
+            session.flush()
+        except IntegrityError:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Unable to create an account with these details",
+            )
+        session.commit()
+
+    return user

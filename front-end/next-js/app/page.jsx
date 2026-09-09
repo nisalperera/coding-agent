@@ -11,7 +11,6 @@ import { useTheme } from '../hooks/useTheme';
 import { useAttachments } from '../hooks/useAttachments';
 import { useChat } from '../hooks/useChat';
 import { getIntegrationsStatus } from '../lib/integrations';
-import { use } from 'marked';
 
 const EMPTY_INTEGRATIONS = {
     github: {

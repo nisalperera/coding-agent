@@ -1,55 +1,36 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-html, body { height: 100%; }
-#chat::-webkit-scrollbar { width: 8px; }
-#chat::-webkit-scrollbar-thumb { background: rgba(100,100,100,.35); border-radius: 8px; }
-.msg-enter { animation: fadeSlideIn .25s ease-out; }
-@keyframes fadeSlideIn { from { opacity:0; transform:translateY(6px);} to { opacity:1; transform:translateY(0);} }
-#input { field-sizing: content; }
-.typing-dot { animation: blink 1.2s infinite ease-in-out; }
-.typing-dot:nth-child(2) { animation-delay:.2s; }
-.typing-dot:nth-child(3) { animation-delay:.4s; }
-@keyframes blink { 0%,80%,100% {opacity:.2} 40% {opacity:1} }
-.prose-chat pre { border-radius:.5rem; }
-.prose-chat code { word-break: break-word; }
-.file-chip { animation: fadeSlideIn .2s ease-out; }
-#drop-overlay { backdrop-filter: blur(2px); }
-#integrations-modal { backdrop-filter: blur(2px); }
-
-.profile-menu {
+.menu {
   position: relative;
   flex: 0 0 auto;
 }
 
-.profile-menu__trigger {
+.trigger {
   display: inline-grid;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   place-items: center;
   border: 1px solid transparent;
-  border-radius: 50%;
+  border-radius: 9999px;
   background: transparent;
   cursor: pointer;
 }
 
-.profile-menu__trigger:hover,
-.profile-menu__trigger:focus-visible {
+.trigger:hover {
   border-color: rgba(148, 163, 184, 0.35);
   background: rgba(148, 163, 184, 0.12);
+}
+
+.trigger:focus-visible {
+  border-color: rgba(96, 165, 250, 0.8);
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.32);
   outline: none;
 }
 
-.profile-menu__trigger:focus-visible {
-  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.32);
-}
-
-.profile-avatar {
+.avatar {
+  position: relative;
   display: inline-grid;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   overflow: hidden;
   place-items: center;
   border-radius: 50%;
@@ -62,27 +43,25 @@ html, body { height: 100%; }
   user-select: none;
 }
 
-.profile-avatar--large {
+.avatarLarge {
   width: 42px;
   height: 42px;
   flex: 0 0 auto;
   font-size: 14px;
 }
 
-.profile-avatar__image {
-  width: 100%;
-  height: 100%;
+.avatarImage {
   object-fit: cover;
 }
 
-.profile-avatar__fallback {
+.avatarFallback {
   display: inline-grid;
   width: 100%;
   height: 100%;
   place-items: center;
 }
 
-.profile-menu__panel {
+.panel {
   position: absolute;
   z-index: 1000;
   top: calc(100% + 10px);
@@ -92,10 +71,10 @@ html, body { height: 100%; }
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 12px;
   background: #111827;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
 }
 
-.profile-menu__identity {
+.identity {
   display: flex;
   gap: 12px;
   align-items: center;
@@ -103,37 +82,37 @@ html, body { height: 100%; }
   padding: 10px 8px;
 }
 
-.profile-menu__identity-text {
+.identityText {
   min-width: 0;
 }
 
-.profile-menu__identity-text strong,
-.profile-menu__identity-text span {
+.identityText strong,
+.identityText span {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.profile-menu__identity-text strong {
+.identityText strong {
   color: #f8fafc;
   font-size: 14px;
   font-weight: 600;
 }
 
-.profile-menu__identity-text span {
+.identityText span {
   margin-top: 3px;
   color: #94a3b8;
   font-size: 12px;
 }
 
-.profile-menu__divider {
+.divider {
   height: 1px;
   margin: 7px 0;
   background: rgba(148, 163, 184, 0.18);
 }
 
-.profile-menu__item {
+.menuItem {
   display: flex;
   width: 100%;
   min-height: 36px;
@@ -150,24 +129,24 @@ html, body { height: 100%; }
   cursor: pointer;
 }
 
-.profile-menu__item:hover,
-.profile-menu__item:focus-visible {
+.menuItem:hover,
+.menuItem:focus-visible {
   background: rgba(148, 163, 184, 0.12);
   outline: none;
 }
 
-.profile-menu__item:focus-visible {
+.menuItem:focus-visible {
   box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.45);
 }
 
-.profile-menu__item--danger:hover,
-.profile-menu__item--danger:focus-visible {
+.logoutItem:hover,
+.logoutItem:focus-visible {
   background: rgba(248, 81, 73, 0.14);
   color: #ff7b72;
 }
 
 @media (max-width: 640px) {
-  .profile-menu__panel {
+  .panel {
     right: -8px;
   }
 }

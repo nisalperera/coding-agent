@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 IntegrationProvider = Literal["github", "gitlab"]
 
@@ -100,3 +100,26 @@ class IntegrationsStatusResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     integrations: dict[IntegrationProvider, IntegrationStatus]
+
+
+class RegisterRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: str
+    username: str | None
+    name: str | None
+    email: EmailStr
+    email_verified: bool
+    picture: str | None
+    auth_provider: str
