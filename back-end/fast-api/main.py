@@ -15,7 +15,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import actions, auth, chat, health, integration
+from app.api import actions, auth, chat, health, integration, settings as app_settings
 from app.core.config import settings
 from app.db.database import assert_database_ready, dispose_database_engine
 
@@ -50,3 +50,4 @@ app.include_router(actions.router)
 app.include_router(chat.router)
 app.include_router(integration.router)
 app.include_router(integration.integration_status_router)
+app.include_router(app_settings.router)

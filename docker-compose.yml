@@ -20,6 +20,10 @@ services:
             retries: 30
             start_period: 30s
         network_mode: host
+        ipc: host
+        dns:
+            - 192.168.1.15
+            - 1.1.1.1
 
     migrate:
         build:
@@ -32,14 +36,19 @@ services:
                 condition: service_healthy
         restart: "no"
         network_mode: host
+        ipc: host
+        dns:
+            - 192.168.1.15
+            - 1.1.1.1
 
     # vllm:
     #     build:
     #         context: ./vllm-model
-    #     image: vllm/vllm-openai:v0.10.2
+    #     image: coding-agent-vllm:local
     #     container_name: coding-agent-vllm
     #     restart: unless-stopped
     #     network_mode: host
+    #     ipc: host
     #     env_file:
     #         - vllm-model/.env
     #     volumes:
@@ -54,11 +63,13 @@ services:
     #     healthcheck:
     #         test:
     #             - CMD-SHELL
-    #             - curl -f http://127.0.0.1:9000/health || exit 1
-    #         interval: 10s
-    #         timeout: 5s
-    #         retries: 30
-    #         start_period: 120s
+    #             - >-
+    #                 python3 -c "import urllib.request;
+    #                 urllib.request.urlopen('http://127.0.0.1:9000/health', timeout=5)"
+    #         interval: 15s
+    #         timeout: 10s
+    #         retries: 40
+    #         start_period: 300s
 
     backend:
         build:
@@ -78,13 +89,17 @@ services:
             # vllm:
             #     condition: service_healthy
         network_mode: host
+        ipc: host
+        dns:
+            - 192.168.1.15
+            - 1.1.1.1
 
     frontend:
         build:
             context: ./front-end/next-js
             dockerfile: Dockerfile
             args:
-                NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
+                NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-https://api.ganisalchperera.com}
         container_name: frontend
         ports:
             - "3000:3000"
@@ -94,6 +109,10 @@ services:
             backend:
                 condition: service_started
         network_mode: host
+        ipc: host
+        dns:
+            - 192.168.1.15
+            - 1.1.1.1
 
 volumes:
     mysql_data:

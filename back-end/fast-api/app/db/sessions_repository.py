@@ -62,6 +62,8 @@ def get_session_user(token: str) -> Optional[dict[str, Any]]:
             "email_verified": user.email_verified,
             "name": user.name,
             "picture": user.picture,
+            "username": user.username,
+            "auth_provider": user.auth_provider,
         }
 
 

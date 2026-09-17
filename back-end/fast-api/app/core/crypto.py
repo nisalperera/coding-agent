@@ -48,3 +48,20 @@ def decrypt_token(ciphertext: str) -> str:
         raise TokenEncryptionError(
             "Token ciphertext is invalid or was encrypted with a different key"
         ) from exc
+
+def encrypt_secret(plaintext: str) -> str:
+    """Encrypt a non-empty secret for ciphertext storage."""
+    if not plaintext:
+        raise TokenEncryptionError("Cannot encrypt an empty secret")
+    return _fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
+
+def decrypt_secret(ciphertext: str) -> str:
+    """Decrypt a non-empty secret read from ciphertext storage."""
+    if not ciphertext:
+        raise TokenEncryptionError("Cannot decrypt an empty ciphertext")
+    try:
+        return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, UnicodeDecodeError) as exc:
+        raise TokenEncryptionError(
+            "Secret ciphertext is invalid or was encrypted with a different key"
+        ) from exc

@@ -5,11 +5,12 @@ from datetime import datetime
 from fastapi import HTTPException
 from fastapi.responses import Response
 
-from app.schemas import LoginRequest, UserResponse
+from app.schemas import LoginRequest, UserResponse, UserSettingsResponse
 from app.core.security import hash_password, set_auth_cookie, verify_password
 from app.db.sessions_repository import create_session
 from app.db.models import User, new_uuid
 from app.db.users_repository import get_user_by_email, get_users_count_by_prefix, put_user
+from app.services.settings_service import reset_integration_settings, get_user_settings
 
 MAX_USERNAME_LENGTH = 64
 
@@ -51,7 +52,7 @@ async def check_if_user_exists(email: str) -> bool:
     return existing_user is not None
 
 
-async def save_user(username: str, email: str, name: str, password: str, response: Response) -> User:
+async def save_user(username: str, email: str, name: str, password: str, response: Response) -> tuple[User, UserSettingsResponse]:
     now = int(datetime.now().timestamp())
     user = User(
             user_id=new_uuid(),
@@ -71,11 +72,11 @@ async def save_user(username: str, email: str, name: str, password: str, respons
 
     token = create_session(user_id=user.user_id)
     set_auth_cookie(response, token)
+    user_settings = await reset_integration_settings(saved_user)  # Initialize default settings for the new user
+    return saved_user, user_settings
 
-    return saved_user
 
-
-async def user_login(payload: LoginRequest, response: Response) -> UserResponse:
+async def user_login(payload: LoginRequest, response: Response) -> tuple[UserResponse, UserSettingsResponse]:
     email = normalize_email(str(payload.email))
     
     user = await get_user_by_email(email, return_password=True)  # Raises HTTPException if user does not exist
@@ -96,4 +97,6 @@ async def user_login(payload: LoginRequest, response: Response) -> UserResponse:
     token = create_session(user_id=user["user_id"])
     set_auth_cookie(response, token)
 
-    return UserResponse(**user)
+    user_settings = await get_user_settings(User(**user))  # Ensure user settings are initialized
+
+    return UserResponse(**user), user_settings
