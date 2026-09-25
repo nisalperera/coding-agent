@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
+from urllib import response
+from urllib import response
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -92,6 +94,10 @@ async def chat_completions(
 
         if not ready:
             return
+
+        if len(body.attachments):
+            attachments = body.attachments
+            log_event(logging.INFO, "found_attachments", msg=f"Processing {len(body.attachments)} attachments", trace_id=trace_id)
 
         messages = list(body.history) + [{"role": "user", "content": body.message}]
 

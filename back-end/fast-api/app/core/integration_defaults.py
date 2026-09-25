@@ -7,7 +7,7 @@ DEFAULT_LLM_MAX_TOKENS = 4096
 DEFAULT_LLM_STREAM_RESPONSES = True
 
 DEFAULT_LLM_PROVIDER_NAME="Custom"
-DEFAULT_LLM_ENDPOINT_URL="https://vllm.ganisalchperera.com/v1/chat/completions"
+DEFAULT_LLM_ENDPOINT_URL="https://llm.nisalchperera.com/v1/chat/completions"
 DEFAULT_LLM_MODEL="Qwen2.5-Coder-14b"
 
 UPDATABLE_USER_SETTINGS_FIELDS = frozenset(

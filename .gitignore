@@ -219,5 +219,6 @@ __marimo__/
 
 back-end/fast-api/data/*.db
 back-end/fast-api/alembic/
+back-end/fast-api/.backend/
 
 vllm-model/huggingface/

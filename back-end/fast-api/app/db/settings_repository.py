@@ -1,25 +1,13 @@
 
-import copy
-from typing import Any, Optional
-from collections.abc import Mapping
+from typing import Optional
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from fastapi import HTTPException, status
 
 from app.core.crypto import encrypt_secret
-from app.db.models import (
-    UserSettings,
-    GitHubIntegrationSettings,
-    GitLabIntegrationSettings,
-    LlmIntegrationSettings,
-)
-from app.schemas import (
-    UserSettingsUpdateRequest,
-    LlmIntegrationSettingsUpdate,
-    GitHubIntegrationSettingsUpdate,
-    GitLabIntegrationSettingsUpdate,
-)
+from app.db.models import UserSettings
+from app.schemas import UserSettingsUpdateRequest
 from app.db.database import db_session
 from app.core.integration_defaults import (
     DEFAULT_GITHUB_BASE_URL,
@@ -41,6 +29,43 @@ def _check_empty_settings(settings: UserSettings):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Settings not found",
         )
+
+
+def create_user_settings(user_id: str) -> UserSettings:
+    """
+    Create a UserSettings record with defaults for user_id.
+
+    If a settings record already exists, return it instead.
+    """
+    with db_session() as session:
+        existing_settings = session.scalar(
+            select(UserSettings).where(UserSettings.user_id == user_id)
+        )
+        if existing_settings is not None:
+            return existing_settings
+
+        new_settings = UserSettings(
+            user_id=user_id,
+            github_enabled=False,
+            github_base_url=DEFAULT_GITHUB_BASE_URL,
+            github_scopes=list(DEFAULT_GITHUB_SCOPES),
+            gitlab_enabled=False,
+            gitlab_base_url=DEFAULT_GITLAB_BASE_URL,
+            gitlab_scopes=list(DEFAULT_GITLAB_SCOPES),
+            llm_enabled=False,
+            llm_provider_name=DEFAULT_LLM_PROVIDER_NAME,
+            llm_endpoint_url=DEFAULT_LLM_ENDPOINT_URL,
+            llm_model=DEFAULT_LLM_MODEL,
+            llm_temperature=DEFAULT_LLM_TEMPERATURE,
+            llm_max_tokens=DEFAULT_LLM_MAX_TOKENS,
+            llm_stream_responses=DEFAULT_LLM_STREAM_RESPONSES,
+        )
+
+        session.add(new_settings)
+        session.flush()
+        session.refresh(new_settings)
+
+        return new_settings
 
 
 def get_user_settings(user_id: str) -> Optional[UserSettings]:

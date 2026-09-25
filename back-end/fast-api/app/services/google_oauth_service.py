@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.db.oauth_state_repository import consume_oauth_state, save_oauth_state
 from app.db.sessions_repository import create_session
 from app.db.users_repository import upsert_google_user_claims
+from app.services.settings_service import create_integration_settings
 
 _oauth_state_serializer = URLSafeTimedSerializer(settings.SESSION_SECRET, salt=settings.OAUTH_STATE_COOKIE_SALT)
 
@@ -133,6 +134,8 @@ async def handle_callback(code: str, state: str, request: Request) -> RedirectRe
 
     user = await asyncio.to_thread(upsert_google_user_claims, claims)
     session_token = await asyncio.to_thread(create_session, user["user_id"])
+
+    create_integration_settings(user)  # Ensure user settings exist
 
     response = RedirectResponse(
         url=settings.POST_LOGIN_REDIRECT_URL,

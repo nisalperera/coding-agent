@@ -1,18 +1,71 @@
 """Client for the self-hosted vLLM OpenAI-compatible server (localhost or LAN)."""
+import time
 import json
+import logging
 from typing import Any, AsyncIterator, Optional
 
 import httpx
 
 from app.core.config import settings
 from app.core.streaming import sse
+from app.core.logging import log_event
 
+
+VLLM_HEALTH_TIMEOUT = httpx.Timeout(
+    connect=15.0,
+    read=10.0,
+    write=10.0,
+    pool=5.0,
+)
 
 async def is_vllm_ready(client: httpx.AsyncClient) -> bool:
+    endpoint = settings.VLLM_HEALTH_ENDPOINT
+
     try:
-        response = await client.get(settings.VLLM_HEALTH_ENDPOINT, timeout=5.0)
-        return response.status_code == 200
-    except httpx.HTTPError:
+        response = await client.get(
+            endpoint,
+            timeout=VLLM_HEALTH_TIMEOUT,
+        )
+
+        ready = response.status_code == httpx.codes.OK
+
+        log_event(
+            logging.INFO if ready else logging.WARNING,
+            message=(
+                "vLLM health check completed: "
+                f"endpoint={endpoint}, "
+                f"status_code={response.status_code}, "
+                f"ready={ready}"
+            ),
+            trace_id="N/A",
+        )
+
+        return ready
+
+    except httpx.TimeoutException as exc:
+        log_event(
+            logging.WARNING,
+            message=(
+                "vLLM health check timed out: "
+                f"endpoint={endpoint}, "
+                f"exception_type={type(exc).__name__}, "
+                f"error={exc!r}"
+            ),
+            trace_id="N/A",
+        )
+        return False
+
+    except httpx.RequestError as exc:
+        log_event(
+            logging.WARNING,
+            message=(
+                "vLLM health check request failed: "
+                f"endpoint={endpoint}, "
+                f"exception_type={type(exc).__name__}, "
+                f"error={exc!r}"
+            ),
+            trace_id="N/A",
+        )
         return False
 
 
@@ -22,6 +75,27 @@ async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], t
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
     response = await client.post(settings.VLLM_ENDPOINT, json=payload)
+    if response.status_code >= 400:
+        log_event(
+            logging.INFO,
+            "vllm_request_rejected",
+            **{
+                "status_code": response.status_code,
+                "response_headers": dict(response.headers),
+                "response_body": response.text,
+                "request_url": str(response.request.url),
+                "request_headers": {
+                    key: value
+                    for key, value in response.request.headers.items()
+                    if key.lower() not in {
+                        "authorization",
+                        "cookie",
+                        "x-api-key",
+                        "proxy-authorization",
+                    }
+                },
+            },
+        )
     response.raise_for_status()
     return response.json()
 

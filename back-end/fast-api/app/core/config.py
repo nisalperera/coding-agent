@@ -152,9 +152,9 @@ class Settings:
     )
     OAUTH_STATE_COOKIE_NAME = "google_oauth_state"
 
-    VLLM_ENDPOINT = "http://localhost:9000/v1/chat/completions"
-    VLLM_HEALTH_ENDPOINT = "http://localhost:9000/health"
-    MODEL_NAME = "Qwen/Qwen2.5-Coder-14B-Instruct"
+    VLLM_ENDPOINT = _require("VLLM_ENDPOINT")
+    VLLM_HEALTH_ENDPOINT = _require("VLLM_HEALTH_ENDPOINT")
+    MODEL_NAME = _optional("VLLM_MODEL", "qwen2.5-coder-14b")
     STARTUP_BUDGET_S = 120
     POLL_INTERVAL_S = 2.0
     RETRY_AFTER_S = 60

@@ -1,11 +1,12 @@
 from __future__ import annotations
-
+from typing import Any
 from fastapi import HTTPException, status
 
 from app.db.settings_repository import (
     get_user_settings as fetch_user_settings,
     reset_user_settings,
-    update_user_settings
+    update_user_settings,
+    create_user_settings
 )
 
 from app.db.models import (
@@ -21,7 +22,7 @@ from app.schemas import (
 )
 
 
-def get_or_create_locked_settings(
+def get_locked_settings(
     user_id: str,
 ) -> UserSettings:
     """
@@ -104,6 +105,21 @@ async def update_integration_settings(current_user: User, payload: UserSettingsU
     return build_user_settings_response(settings_record)
 
 
+def create_integration_settings(current_user: User | dict[str, Any]) -> UserSettingsResponse:
+    if isinstance(current_user, dict):
+        current_user = User(**current_user)
+
+    if current_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user no longer exists.",
+        )
+
+    settings_record = create_user_settings(current_user.user_id)
+
+    return build_user_settings_response(settings_record)
+
+
 async def reset_integration_settings(authenticated_user: User) -> UserSettingsResponse:
     if authenticated_user is None:
         raise HTTPException(
@@ -111,13 +127,14 @@ async def reset_integration_settings(authenticated_user: User) -> UserSettingsRe
             detail="Authenticated user no longer exists.",
         )
 
-    settings_record = get_or_create_locked_settings(
+    settings_record = get_locked_settings(
         user_id=authenticated_user.user_id,
     )
 
     settings_record = reset_user_settings(authenticated_user.user_id)
 
     return build_user_settings_response(settings_record)
+
 
 async def get_user_settings(authenticated_user: User) -> UserSettingsResponse:
     settings_record = fetch_user_settings(authenticated_user.user_id)
