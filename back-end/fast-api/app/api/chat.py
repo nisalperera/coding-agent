@@ -103,6 +103,7 @@ async def chat_completions(
 
         try:
             first_result = await call_vllm(client, messages, tools=TOOLS)
+            # log_event(logging.INFO, "vllm_chat_responce", trace_id=trace_id, msg=f"vllm response: {first_result}")
             assistant_message = first_result["choices"][0]["message"]
         except (
             httpx.HTTPError,
@@ -114,7 +115,7 @@ async def chat_completions(
             log_event(
                 logging.ERROR,
                 "vllm_tool_planning_failed",
-                error=str(exc),
+                error=str(exc.__class__.__name__),
                 trace_id=trace_id,
             )
             yield json_line(

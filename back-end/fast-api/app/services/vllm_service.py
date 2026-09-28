@@ -71,13 +71,39 @@ async def is_vllm_ready(client: httpx.AsyncClient) -> bool:
 
 async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], tools: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
     payload: dict[str, Any] = {"model": settings.MODEL_NAME, "messages": messages, "stream": False}
+    log_event(
+        logging.INFO,
+        "vllm_request_initiated",
+        **{
+            "request_payload": payload,
+            "request_url": settings.VLLM_ENDPOINT,
+            "request_headers": {
+                key: value
+                for key, value in client.headers.items()
+                if key.lower() not in {
+                    "authorization",
+                    "cookie",
+                    "x-api-key",
+                    "proxy-authorization",
+                }
+            },
+            "request_timeout": client.timeout.__dict__,
+        },
+    )
+    if len(payload["messages"]) <= 1:
+        log_event(
+            logging.INFO,
+            "vllm_request_first_message",
+            msg=f"Increased read timeout for first message to 60.0 seconds",
+        )
+        client.timeout.read = 60.0
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
     response = await client.post(settings.VLLM_ENDPOINT, json=payload)
     if response.status_code >= 400:
         log_event(
-            logging.INFO,
+            logging.ERROR,
             "vllm_request_rejected",
             **{
                 "status_code": response.status_code,
