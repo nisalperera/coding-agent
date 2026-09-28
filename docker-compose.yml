@@ -10,11 +10,35 @@ services:
             - --collation-server=utf8mb4_unicode_ci
             - --default-storage-engine=INNODB
         volumes:
-            - mysql_data:/var/lib/mysql
+            - ./mysql/data:/var/lib/mysql
         healthcheck:
             test:
                 - CMD-SHELL
                 - mysqladmin ping -h 127.0.0.1 -u root -p"$${MYSQL_ROOT_PASSWORD}" --silent
+            interval: 5s
+            timeout: 5s
+            retries: 30
+            start_period: 30s
+        network_mode: host
+        ipc: host
+        dns:
+            - 192.168.1.15
+            - 1.1.1.1
+
+    mongodb:
+        image: mongo:latest
+        container_name: mongodb
+        restart: always
+        ports:
+            - "27017:27017"
+        env_file:
+            - ./mongodb/.env
+        volumes:
+            - ./mongodb/data:/data/db
+        healthcheck:
+            test: 
+                - "CMD-SHELL"
+                - "mongosh --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval 'db.runCommand({ping:1})' --quiet"
             interval: 5s
             timeout: 5s
             retries: 30
@@ -76,28 +100,28 @@ services:
             - 192.168.1.15
             - 1.1.1.1
 
-    # backend:
-    #     build:
-    #         context: ./back-end/fast-api
-    #     container_name: backend
-    #     env_file:
-    #         - ./back-end/fast-api/.env
-    #     ports:
-    #         - "8000:8000"
-    #     volumes:
-    #         - ./back-end/fast-api:/code
-    #     depends_on:
-    #         mysql:
-    #             condition: service_healthy
-    #         migrate:
-    #             condition: service_completed_successfully
-    #         vllm:
-    #             condition: service_healthy
-    #     network_mode: host
-    #     ipc: host
-    #     dns:
-    #         - 192.168.1.15
-    #         - 1.1.1.1
+    backend:
+        build:
+            context: ./back-end/fast-api
+        container_name: backend
+        env_file:
+            - ./back-end/fast-api/.env
+        ports:
+            - "8000:8000"
+        volumes:
+            - ./back-end/fast-api:/code
+        depends_on:
+            mysql:
+                condition: service_healthy
+            migrate:
+                condition: service_completed_successfully
+            vllm:
+                condition: service_healthy
+        network_mode: host
+        ipc: host
+        dns:
+            - 192.168.1.15
+            - 1.1.1.1
 
     frontend:
         build:
@@ -110,14 +134,11 @@ services:
             - "3000:3000"
         env_file:
             - ./front-end/next-js/.env
-        # depends_on:
-        #     backend:
-        #         condition: service_started
+        depends_on:
+            backend:
+                condition: service_started
         network_mode: host
         ipc: host
         dns:
             - 192.168.1.15
             - 1.1.1.1
-
-volumes:
-    mysql_data:

@@ -535,21 +535,20 @@ class UserSettings(Base):
         "llm_api_key_ciphertext",
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+    expires_at: Mapped[BIGINT] = mapped_column(BIGINT,
         nullable=False,
         server_default=func.now(),
     )
 
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+    updated_at: Mapped[BIGINT] = mapped_column(
+        BIGINT,
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
     )
 
-    last_seen_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
+    last_seen_at: Mapped[BIGINT | None] = mapped_column(
+        BIGINT,
         nullable=True,
     )
 
