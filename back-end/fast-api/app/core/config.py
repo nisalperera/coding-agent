@@ -232,7 +232,7 @@ class Settings:
         parsed = urlparse(cls.DATABASE_URL)
         if parsed.scheme not in {"mysql+pymysql", "postgresql+psycopg"}:
             raise RuntimeError(
-                "DATABASE_URL must use the mysql+pymysql or postgresql SQLAlchemy dialect"
+                "DATABASE_URL must use the mysql+pymysql or postgresql+psycopg SQLAlchemy dialect"
             )
 
     @classmethod
