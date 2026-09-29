@@ -24,7 +24,7 @@ def _extract_token(request: Request, authorization: Optional[str]) -> Optional[s
 async def current_user(request: Request, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
     token = _extract_token(request, authorization)
     if not token:
-        raise HTTPException(status_code=401, detail="Missing session token")
+        raise HTTPException(status_code=401, detail="Missing session token for user authentication")
 
     user = await asyncio.to_thread(get_session_user, token)
     if not user:
@@ -34,7 +34,7 @@ async def current_user(request: Request, authorization: Optional[str] = Header(d
 async def current_user_settings(request: Request, authorization: Optional[str] = Header(default=None)) -> UserSettingsResponse:
     token = _extract_token(request, authorization)
     if not token:
-        raise HTTPException(status_code=401, detail="Missing session token")
+        raise HTTPException(status_code=401, detail="Missing session token for settings authentication")
 
     user = await asyncio.to_thread(get_session_user, token)
     if not user:
