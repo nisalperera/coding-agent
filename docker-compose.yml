@@ -1,29 +1,29 @@
 services:
-    mysql:
-        image: mysql:8.4
-        container_name: mysql
-        restart: unless-stopped
-        env_file:
-            - ./.env
-        command:
-            - --character-set-server=utf8mb4
-            - --collation-server=utf8mb4_unicode_ci
-            - --default-storage-engine=INNODB
-        volumes:
-            - ./mysql/data:/var/lib/mysql
-        healthcheck:
-            test:
-                - CMD-SHELL
-                - mysqladmin ping -h 127.0.0.1 -u root -p"$${MYSQL_ROOT_PASSWORD}" --silent
-            interval: 5s
-            timeout: 5s
-            retries: 30
-            start_period: 30s
-        network_mode: host
-        ipc: host
-        dns:
-            - 192.168.1.15
-            - 1.1.1.1
+    # mysql:
+    #     image: mysql:8.4
+    #     container_name: mysql
+    #     restart: unless-stopped
+    #     env_file:
+    #         - ./.env
+    #     command:
+    #         - --character-set-server=utf8mb4
+    #         - --collation-server=utf8mb4_unicode_ci
+    #         - --default-storage-engine=INNODB
+    #     volumes:
+    #         - ./mysql/data:/var/lib/mysql
+    #     healthcheck:
+    #         test:
+    #             - CMD-SHELL
+    #             - mysqladmin ping -h 127.0.0.1 -u root -p"$${MYSQL_ROOT_PASSWORD}" --silent
+    #         interval: 5s
+    #         timeout: 5s
+    #         retries: 30
+    #         start_period: 30s
+    #     network_mode: host
+    #     ipc: host
+    #     dns:
+    #         - 192.168.1.15
+    #         - 1.1.1.1
 
     # mongodb:
     #     image: mongo:latest
@@ -55,9 +55,9 @@ services:
         env_file:
             - ./back-end/fast-api/.env
         command: [ "alembic", "upgrade", "head" ]
-        depends_on:
-            mysql:
-                condition: service_healthy
+        # depends_on:
+        #     mysql:
+        #         condition: service_healthy
         restart: "no"
         network_mode: host
         ipc: host

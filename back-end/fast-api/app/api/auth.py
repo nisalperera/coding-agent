@@ -37,7 +37,6 @@ async def google_callback(
     code: str = Query(...),
     state: str = Query(...),
 ) -> RedirectResponse:
-    print(f"Received Google OAuth callback with code: {code} and state: {state}")
     return await handle_callback(code, state, request)
 
 
