@@ -73,7 +73,7 @@ async def build_login_redirect(request: Request) -> RedirectResponse:
         max_age=settings.OAUTH_STATE_TTL_S,
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite="lax",
+        samesite=None,
         path="/v1/auth/google",
     )
     return response
@@ -151,7 +151,7 @@ async def handle_callback(code: str, state: str, request: Request) -> RedirectRe
         max_age=settings.SESSION_TTL_S,
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite="lax",
+        samesite=None,
         path="/",
     )
     return response

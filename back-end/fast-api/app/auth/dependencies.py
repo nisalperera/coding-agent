@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from fastapi import Header, HTTPException, Request
 
+from app.core.config import settings
 from app.schemas import UserSettingsResponse
 from app.db.sessions_repository import get_session_user
 from app.db.settings_repository import get_user_settings
@@ -18,7 +19,7 @@ from app.services.settings_service import build_user_settings_response
 def _extract_token(request: Request, authorization: Optional[str]) -> Optional[str]:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization.split(" ", 1)[1].strip()
-    return request.cookies.get("session")
+    return request.cookies.get(settings.SESSION_COOKIE_NAME)
 
 
 async def current_user(request: Request, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:

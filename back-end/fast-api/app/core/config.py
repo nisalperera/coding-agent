@@ -88,7 +88,7 @@ class Settings:
         "google-oauth-state-v1",
     )
 
-    COOKIE_SECURE: bool = _as_bool("COOKIE_SECURE", False)
+    COOKIE_SECURE: bool = _as_bool("COOKIE_SECURE", True)
 
     DATABASE_URL: str = _optional("DATABASE_URL")
     DATABASE_POOL_SIZE: int = int(_optional("DATABASE_POOL_SIZE", "5"))
