@@ -87,6 +87,8 @@ class Message(Document):
     id: str = Field(default_factory=new_uuid)
     # Both are UUID strings. conversation_id refers to Conversation.id.
     conversation_id: str
+    trace_id: str | None = None
+    # Exact value of MySQL users.user_id; not a MongoDB User reference.
     user_id: str
 
     role: Literal["system", "user", "assistant", "tool"]

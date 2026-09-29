@@ -36,6 +36,7 @@ from app.core.logging import log_event
 from app.core.rate_limit import check_rate_limit
 from app.core.streaming import json_line, sse
 from app.schemas import ChatRequest
+from app.services.settings_service import get_locked_settings
 from app.services.backend_readiness_service import ensure_backend_ready
 from app.services.pending_actions_service import create_pending_action_record
 from app.services.vllm_service import call_vllm, vllm_token_stream
@@ -63,6 +64,8 @@ async def chat_completions(
     """Run an authenticated tool-capable chat completion stream."""
     trace_id = str(uuid.uuid4())
     user_id = user["user_id"]
+
+    user_settings = get_locked_settings(user_id=user_id)
 
     if not check_rate_limit(user_id):
         log_event(
@@ -102,7 +105,7 @@ async def chat_completions(
         messages = list(body.history) + [{"role": "user", "content": body.message}]
 
         try:
-            first_result = await call_vllm(client, messages, tools=TOOLS)
+            first_result = await call_vllm(client, messages, tools=TOOLS, user_settings=user_settings)
             # log_event(logging.INFO, "vllm_chat_responce", trace_id=trace_id, msg=f"vllm response: {first_result}")
             assistant_message = first_result["choices"][0]["message"]
         except (

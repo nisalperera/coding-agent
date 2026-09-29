@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.streaming import sse
 from app.core.logging import log_event
 
+from app.db.models import UserSettings
 
 VLLM_HEALTH_TIMEOUT = httpx.Timeout(
     connect=15.0,
@@ -69,14 +70,15 @@ async def is_vllm_ready(client: httpx.AsyncClient) -> bool:
         return False
 
 
-async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], tools: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
-    payload: dict[str, Any] = {"model": settings.MODEL_NAME, "messages": messages, "stream": False}
+
+async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], user_settings: UserSettings, tools: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"model": user_settings.llm_model, "messages": messages, "stream": False}
     log_event(
         logging.INFO,
         "vllm_request_initiated",
         **{
             "request_payload": payload,
-            "request_url": settings.VLLM_ENDPOINT,
+            "request_url": user_settings.llm_endpoint_url,
             "request_headers": {
                 key: value
                 for key, value in client.headers.items()
@@ -100,7 +102,7 @@ async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], t
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
-    response = await client.post(settings.VLLM_ENDPOINT, json=payload)
+    response = await client.post(user_settings.llm_endpoint_url, json=payload)
     if response.status_code >= 400:
         log_event(
             logging.ERROR,

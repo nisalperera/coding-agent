@@ -25,29 +25,29 @@ services:
             - 192.168.1.15
             - 1.1.1.1
 
-    mongodb:
-        image: mongo:latest
-        container_name: mongodb
-        restart: always
-        ports:
-            - "27017:27017"
-        env_file:
-            - ./mongodb/.env
-        volumes:
-            - ./mongodb/data:/data/db
-        healthcheck:
-            test: 
-                - "CMD-SHELL"
-                - "mongosh --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval 'db.runCommand({ping:1})' --quiet"
-            interval: 5s
-            timeout: 5s
-            retries: 30
-            start_period: 30s
-        network_mode: host
-        ipc: host
-        dns:
-            - 192.168.1.15
-            - 1.1.1.1
+    # mongodb:
+    #     image: mongo:latest
+    #     container_name: mongodb
+    #     restart: always
+    #     ports:
+    #         - "27017:27017"
+    #     env_file:
+    #         - ./mongodb/.env
+    #     volumes:
+    #         - ./mongodb/data:/data/db
+    #     healthcheck:
+    #         test: 
+    #             - "CMD-SHELL"
+    #             - "mongosh --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval 'db.runCommand({ping:1})' --quiet"
+    #         interval: 5s
+    #         timeout: 5s
+    #         retries: 30
+    #         start_period: 30s
+    #     network_mode: host
+    #     ipc: host
+    #     dns:
+    #         - 192.168.1.15
+    #         - 1.1.1.1
 
     migrate:
         build:
@@ -111,8 +111,8 @@ services:
         volumes:
             - ./back-end/fast-api:/code
         depends_on:
-            mysql:
-                condition: service_healthy
+            # mysql:
+            #     condition: service_healthy
             migrate:
                 condition: service_completed_successfully
             vllm:

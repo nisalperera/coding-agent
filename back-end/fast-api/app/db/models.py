@@ -9,11 +9,11 @@ from __future__ import annotations
 import uuid
 from typing import Any, ClassVar, Callable
 
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, replace
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Float, Index, func
-from sqlalchemy.dialects.mysql import BIGINT
-from sqlalchemy.dialects.mysql import JSON as MySQLJSON
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, Float, Index, func
+from sqlalchemy.dialects.postgresql import BIGINT
+from sqlalchemy.dialects.postgresql import JSON as MySQLJSON
 from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, composite
 
@@ -45,6 +45,10 @@ PROVIDER_LENGTH = 32
 def new_uuid() -> str:
     """Return a canonical UUID string suitable for CHAR(36) identifiers."""
     return str(uuid.uuid4())
+
+
+def current_time_ms() -> int:
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
 class Base(DeclarativeBase):
@@ -115,8 +119,8 @@ class User(Base):
         default="google",
     )
 
-    created_at: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=current_time_ms)
+    updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=current_time_ms, onupdate=current_time_ms)
 
     sessions: Mapped[list["SessionRecord"]] = relationship(
         back_populates="user",
@@ -158,7 +162,7 @@ class OAuthState(Base):
     code_verifier: Mapped[str] = mapped_column(String(255), nullable=False)
     cookie_nonce: Mapped[str] = mapped_column(String(255), nullable=False)
     expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
-    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False, default=current_time_ms)
 
 
 class SessionRecord(Base):
@@ -179,7 +183,7 @@ class SessionRecord(Base):
         nullable=False,
     )
     expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
-    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False, default=current_time_ms)
     last_seen_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="sessions")
@@ -200,8 +204,8 @@ class UserIntegration(Base):
     token_expires_at: Mapped[BIGINT | None] = mapped_column(BIGINT, nullable=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    connected_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
-    updated_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    connected_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False, default=current_time_ms)
+    updated_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False, default=current_time_ms)
 
     user: Mapped[User] = relationship(back_populates="integrations")
 
@@ -226,7 +230,7 @@ class PendingAction(Base):
     )
     tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
     args: Mapped[dict[str, Any]] = mapped_column("args_json", MySQLJSON, nullable=False)
-    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False, default=current_time_ms)
     expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="pending_actions")
@@ -253,7 +257,7 @@ class IntegrationOAuthState(Base):
     cookie_nonce: Mapped[str] = mapped_column(String(128), nullable=False)
     code_verifier: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
-    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[BIGINT] = mapped_column(BIGINT, nullable=False, default=current_time_ms)
 
     user: Mapped[User] = relationship(back_populates="integration_oauth_states")
 
@@ -535,16 +539,17 @@ class UserSettings(Base):
         "llm_api_key_ciphertext",
     )
 
-    expires_at: Mapped[BIGINT] = mapped_column(BIGINT,
+    created_at: Mapped[BIGINT] = mapped_column(
+        BIGINT,
         nullable=False,
-        server_default=func.now(),
+        default=current_time_ms,
     )
 
     updated_at: Mapped[BIGINT] = mapped_column(
         BIGINT,
         nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=current_time_ms,
+        onupdate=current_time_ms,
     )
 
     last_seen_at: Mapped[BIGINT | None] = mapped_column(

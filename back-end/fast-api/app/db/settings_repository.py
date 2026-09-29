@@ -6,7 +6,7 @@ from sqlalchemy import select
 from fastapi import HTTPException, status
 
 from app.core.crypto import encrypt_secret
-from app.db.models import UserSettings
+from app.db.models import UserSettings, current_time_ms
 from app.schemas import UserSettingsUpdateRequest
 from app.db.database import db_session
 from app.core.integration_defaults import (
@@ -78,7 +78,7 @@ def get_user_settings(user_id: str) -> Optional[UserSettings]:
         )
         _check_empty_settings(settings_record)
 
-        settings_record.last_seen_at = datetime.now(timezone.utc)
+        settings_record.last_seen_at = current_time_ms()
         session.commit()
         session.refresh(settings_record)
 
