@@ -1,5 +1,5 @@
 """
-[FINAL] AWS Lambda backend for the Perplexity-style web app.
+AWS Lambda backend for the Perplexity-style web app.
 - Checks EC2 (T4 vLLM host) instance state and auto-starts it if stopped/stopping.
 - Streams live progress updates (percentage) while waiting for EC2 + vLLM to become ready.
 - Enforces a hard 2-minute (120s) overall startup budget; if exceeded, tells the user
@@ -9,6 +9,10 @@
 - Enforces per-user rate limiting (OWASP API Security).
 - Routes risky tool calls (write_file, run_shell, and GitHub/GitLab repo-management
   tools) through a human-in-the-loop pending-action flow backed by DynamoDB.
+- For GitHub tools, uses the connecting user's own stored OAuth token (DynamoDB)
+  when available. For GitLab tools, uses a per-request token sent by the front-end
+  with the approval decision (never persisted server-side).
+- Lets a user revoke their stored GitHub integration server-side ("disconnect_integration").
 - Calls a self-hosted vLLM server (Qwen3-Coder-14B) over the VPC.
 """
 import json
@@ -18,12 +22,20 @@ import logging
 import os
 from collections import defaultdict
 
+
 import boto3
 import jwt
 import urllib3
 import urllib.request
 
-from repo_tools import REPO_TOOL_FUNCS, REPO_TOOL_DEFINITIONS, REPO_RISKY_TOOLS
+
+from repo_tools import (
+    REPO_TOOL_FUNCS, REPO_TOOL_DEFINITIONS, REPO_RISKY_TOOLS,
+    GITHUB_TOOL_NAMES, GITLAB_TOOL_NAMES,
+)
+from github_oauth import handle_github_oauth_callback, get_user_integration, delete_user_integration
+from registry import FunctionRegistry
+
 
 VLLM_ENDPOINT = os.environ["VLLM_ENDPOINT"]
 VLLM_HEALTH_ENDPOINT = os.environ.get("VLLM_HEALTH_ENDPOINT", VLLM_ENDPOINT.rsplit("/v1/", 1)[0] + "/health")
@@ -33,23 +45,29 @@ REGION = os.environ.get("AWS_REGION", "us-east-1")
 TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
 EC2_INSTANCE_ID = os.environ["EC2_INSTANCE_ID"]
 
+
 STARTUP_BUDGET_S = int(os.environ.get("STARTUP_BUDGET_S", "120"))
 POLL_INTERVAL_S = 3
 RETRY_AFTER_S = 120
 
+
 JWKS_URL = "https://cognito-idp." + REGION + ".amazonaws.com/" + USER_POOL_ID + "/.well-known/jwks.json"
+
 
 http = urllib3.PoolManager()
 dynamodb = boto3.resource("dynamodb")
 pending_table = dynamodb.Table("pending-actions")
 ec2_client = boto3.client("ec2", region_name=REGION)
 
+
 logger = logging.getLogger("coding-agent")
 logger.setLevel(logging.INFO)
+
 
 RISKY_TOOLS = {"write_file", "run_shell"} | REPO_RISKY_TOOLS
 _jwks_cache = None
 _rate_limits = defaultdict(list)
+
 
 TOOLS = [{"type": "function", "function": {
     "name": "web_search", "description": "Search the web for current information",
@@ -57,12 +75,15 @@ TOOLS = [{"type": "function", "function": {
 TOOLS = TOOLS + REPO_TOOL_DEFINITIONS
 
 
+function_registry = FunctionRegistry()
+
 def log_event(level, message, **fields):
     logger.log(level, json.dumps({
         "timestamp": time.time(), "level": logging.getLevelName(level),
         "trace_id": fields.pop("trace_id", str(uuid.uuid4())),
         "message": message, **fields,
     }))
+
 
 
 def get_instance_state():
@@ -73,12 +94,14 @@ def get_instance_state():
     return reservations[0]["Instances"][0]["State"]["Name"]
 
 
+
 def is_vllm_ready():
     try:
         resp = http.request("GET", VLLM_HEALTH_ENDPOINT, timeout=5.0)
         return resp.status == 200
     except Exception:
         return False
+
 
 
 def write_progress(response_stream, phase, elapsed, budget, message):
@@ -89,9 +112,11 @@ def write_progress(response_stream, phase, elapsed, budget, message):
     }).encode() + b"\n")
 
 
+
 def ensure_backend_ready(response_stream, trace_id):
     start_time = time.time()
     deadline = start_time + STARTUP_BUDGET_S
+
 
     try:
         state = get_instance_state()
@@ -99,16 +124,20 @@ def ensure_backend_ready(response_stream, trace_id):
         log_event(logging.ERROR, "ec2_check_failed", error=str(e), trace_id=trace_id)
         return False, "Could not reach EC2. Please try again in " + str(RETRY_AFTER_S // 60) + " minutes."
 
+
     log_event(logging.INFO, "ec2_state_checked", state=state, trace_id=trace_id)
+
 
     if state in ("shutting-down", "terminated"):
         log_event(logging.ERROR, "ec2_unavailable", state=state, trace_id=trace_id)
         return False, "Backend instance is unavailable. Contact support."
 
+
     if state == "stopped":
         log_event(logging.INFO, "ec2_starting", trace_id=trace_id)
         write_progress(response_stream, "starting_instance", 0, STARTUP_BUDGET_S, "Starting GPU instance...")
         ec2_client.start_instances(InstanceIds=[EC2_INSTANCE_ID])
+
 
     while state != "running":
         elapsed = time.time() - start_time
@@ -119,7 +148,9 @@ def ensure_backend_ready(response_stream, trace_id):
         time.sleep(POLL_INTERVAL_S)
         state = get_instance_state()
 
+
     log_event(logging.INFO, "ec2_running", trace_id=trace_id)
+
 
     while not is_vllm_ready():
         elapsed = time.time() - start_time
@@ -129,10 +160,12 @@ def ensure_backend_ready(response_stream, trace_id):
         write_progress(response_stream, "loading_model", elapsed, STARTUP_BUDGET_S, "Loading model onto GPU...")
         time.sleep(POLL_INTERVAL_S)
 
+
     elapsed = time.time() - start_time
     write_progress(response_stream, "ready", elapsed, STARTUP_BUDGET_S, "Backend ready.")
     log_event(logging.INFO, "vllm_ready", elapsed=round(elapsed, 1), trace_id=trace_id)
     return True, None
+
 
 
 def get_jwks():
@@ -141,6 +174,7 @@ def get_jwks():
         with urllib.request.urlopen(JWKS_URL) as r:
             _jwks_cache = json.loads(r.read())
     return _jwks_cache
+
 
 
 def verify_token(token):
@@ -152,6 +186,7 @@ def verify_token(token):
                        audience=None, options={"verify_aud": False})
 
 
+
 def check_rate_limit(user_id, max_requests=20, window_seconds=60):
     now = time.time()
     _rate_limits[user_id] = [t for t in _rate_limits[user_id] if now - t < window_seconds]
@@ -161,8 +196,10 @@ def check_rate_limit(user_id, max_requests=20, window_seconds=60):
     return True
 
 
+
 def owns_conversation(user_id, conversation_id):
     return True
+
 
 
 def web_search(query):
@@ -171,8 +208,45 @@ def web_search(query):
     return json.dumps([{"title": x["title"], "url": x["url"], "snippet": x["content"][:200]} for x in results])
 
 
+
 FUNCS = {"web_search": web_search}
 FUNCS.update(REPO_TOOL_FUNCS)
+
+
+
+def get_user_github_token(user_id):
+    """
+    Looks up the calling user's own GitHub access token, stored via the
+    "Connect GitHub" OAuth flow (github_oauth.py). Returns None if the user
+    has not connected their GitHub account, in which case repo_tools.py's
+    github_* functions fall back to the shared service-level GITHUB_TOKEN.
+    """
+    integration = get_user_integration(user_id, "github")
+    return integration.get("access_token") if integration else None
+
+
+
+def call_repo_tool(name, args, user_id, gitlab_token=None):
+    """
+    Dispatches a repo-management tool call.
+
+    - github_* tools: injects the calling user's own stored GitHub OAuth
+      token (if connected), falling back to the shared GITHUB_TOKEN.
+    - gitlab_* tools: injects `gitlab_token` if the caller supplied one with
+      this specific request (front-end sends its browser-local GitLab PKCE
+      token per-request; it is never stored server-side). Falls back to the
+      shared GITLAB_TOKEN when absent.
+    """
+    kwargs = dict(args)
+    if name in GITHUB_TOOL_NAMES:
+        token = get_user_github_token(user_id)
+        if token:
+            kwargs["github_token"] = token
+    elif name in GITLAB_TOOL_NAMES:
+        if gitlab_token:
+            kwargs["gitlab_token"] = gitlab_token
+    return FUNCS[name](**kwargs)
+
 
 
 def call_vllm(messages, tools=None, stream=False):
@@ -189,6 +263,45 @@ def call_vllm(messages, tools=None, stream=False):
     return resp
 
 
+@function_registry.register("action_pending")
+def action_pending(body, user_id, response_stream, trace_id):
+    action_id = body["action_id"]
+    item = pending_table.get_item(Key={"action_id": action_id}).get("Item")
+    if not item or item["user_id"] != user_id:
+        response_stream.write(b'{"error": "forbidden"}')
+        return
+    if body["decision"] == "approve":
+        gitlab_token = body.get("gitlab_token")
+        result = call_repo_tool(item["tool_name"], item["args"], user_id, gitlab_token=gitlab_token) \
+            if item["tool_name"] in FUNCS else "Unknown tool."
+    else:
+        result = "User denied this action."
+    pending_table.delete_item(Key={"action_id": action_id})
+    log_event(logging.INFO, "pending_action_resolved", user_id=user_id, decision=body["decision"], trace_id=trace_id)
+    response_stream.write(json.dumps({"result": str(result)}).encode())
+    return
+
+
+@function_registry.register("github_oauth_callback")
+def github_oauth_callback(body, user_id, response_stream, trace_id):
+    status_code, result = handle_github_oauth_callback(body, user_id)
+    log_event(logging.INFO, "github_oauth_callback", user_id=user_id, status_code=status_code, trace_id=trace_id)
+    response_stream.write(json.dumps(result).encode())
+    return
+
+
+@function_registry.register("disconnect_integration")
+def disconnect_integration(body, user_id, response_stream, trace_id):
+    provider = body.get("provider")
+    if provider == "github":
+        delete_user_integration(user_id, "github")
+        log_event(logging.INFO, "integration_disconnected", user_id=user_id, provider=provider, trace_id=trace_id)
+        response_stream.write(json.dumps({"disconnected": True, "provider": "github"}).encode())
+    else:
+        response_stream.write(json.dumps({"disconnected": True, "provider": provider, "server_side": False}).encode())
+    return
+
+
 @awslambda.streamifyResponse
 async def handler(event, response_stream, context):
     trace_id = str(uuid.uuid4())
@@ -196,40 +309,35 @@ async def handler(event, response_stream, context):
     auth_header = headers.get("authorization", "")
     token = auth_header.replace("Bearer ", "")
 
+
     try:
         claims = verify_token(token)
     except Exception:
         response_stream.write(b'{"error": "unauthorized"}')
         return
 
+
     user_id = claims["sub"]
+
 
     if not check_rate_limit(user_id):
         log_event(logging.WARNING, "rate_limit_exceeded", user_id=user_id, trace_id=trace_id)
         response_stream.write(b'{"error": "rate_limit_exceeded"}')
         return
 
-    body = json.loads(event.get("body", "{}"))
 
-    if body.get("action") == "approve_pending":
-        action_id = body["action_id"]
-        item = pending_table.get_item(Key={"action_id": action_id}).get("Item")
-        if not item or item["user_id"] != user_id:
-            response_stream.write(b'{"error": "forbidden"}')
-            return
-        if body["decision"] == "approve":
-            result = FUNCS[item["tool_name"]](**item["args"])
-        else:
-            result = "User denied this action."
-        pending_table.delete_item(Key={"action_id": action_id})
-        log_event(logging.INFO, "pending_action_resolved", user_id=user_id, decision=body["decision"], trace_id=trace_id)
-        response_stream.write(json.dumps({"result": str(result)}).encode())
-        return
+    body = json.loads(event.get("body", "{}"))
+    action = body.get("action")
+
+    if action:
+        return function_registry.execute(action, body, user_id, response_stream, trace_id)        
+
 
     conversation_id = body.get("conversation_id")
     if conversation_id and not owns_conversation(user_id, conversation_id):
         response_stream.write(b'{"error": "forbidden"}')
         return
+
 
     ready, error_message = ensure_backend_ready(response_stream, trace_id)
     if not ready:
@@ -239,18 +347,22 @@ async def handler(event, response_stream, context):
         }).encode())
         return
 
+
     history = body.get("history", [])
     user_message = body.get("message", "")
     messages = history + [{"role": "user", "content": user_message}]
+
 
     first_resp = call_vllm(messages, tools=TOOLS, stream=False)
     result = json.loads(first_resp.data.decode())
     msg = result["choices"][0]["message"]
 
+
     if msg.get("tool_calls"):
         for call in msg["tool_calls"]:
             args = json.loads(call["function"]["arguments"])
             name = call["function"]["name"]
+
 
             if name in RISKY_TOOLS:
                 action_id = str(uuid.uuid4())
@@ -267,9 +379,14 @@ async def handler(event, response_stream, context):
                 }).encode())
                 return
 
+
             messages.append(msg)
-            tool_result = FUNCS[name](**args)
+            if name in GITHUB_TOOL_NAMES or name in GITLAB_TOOL_NAMES:
+                tool_result = call_repo_tool(name, args, user_id, gitlab_token=body.get("gitlab_token"))
+            else:
+                tool_result = FUNCS[name](**args)
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": str(tool_result)})
+
 
     log_event(logging.INFO, "chat_completion_started", user_id=user_id, trace_id=trace_id)
     response_stream.write(json.dumps({"type": "answer_start"}).encode() + b"\n")
@@ -283,5 +400,6 @@ async def handler(event, response_stream, context):
                         response_stream.write(("data: " + json.dumps({"token": delta}) + "\n\n").encode())
                 except (json.JSONDecodeError, KeyError):
                     continue
+
 
     response_stream.write(b"data: [DONE]\n\n")

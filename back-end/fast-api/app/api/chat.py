@@ -1,0 +1,288 @@
+"""
+Streaming chat endpoint: waits for the local vLLM backend to be ready, runs
+one tool-calling round (routing risky tools through the pending-action
+approval flow), then streams the final answer token-by-token.
+
+Wire format on the same stream:
+  1. NDJSON lines for backend-readiness, progress, error, and confirmation
+     events.
+  2. SSE frames ("data: {...}\n\n") for model tokens once generation starts,
+     terminated by "data: [DONE]\n\n".
+
+Authenticated chat route.
+
+Provider credentials are resolved only inside backend-owned dispatch for the
+authenticated user. Browser chat requests do not accept or forward provider
+tokens, OAuth authorization codes, OAuth state, callback values, redirect URIs,
+client configuration, or PKCE material.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from urllib import response
+from urllib import response
+import uuid
+from collections.abc import AsyncIterator
+from typing import Any
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+
+from app.auth.dependencies import current_user
+from app.core.logging import log_event
+from app.core.rate_limit import check_rate_limit
+from app.core.streaming import json_line, sse
+from app.schemas import ChatRequest
+from app.services.settings_service import get_locked_settings
+from app.services.backend_readiness_service import ensure_backend_ready
+from app.services.pending_actions_service import create_pending_action_record
+from app.services.vllm_service import call_vllm, vllm_token_stream
+from app.tools.dispatch import FUNCS, ProviderNotConnectedError, call_tool
+from app.tools.repo_tools import REPO_RISKY_TOOLS, REPO_TOOL_DEFINITIONS
+from app.tools.web_search import WEB_SEARCH_TOOL_DEFINITION
+
+router = APIRouter(prefix="/v1/chat", tags=["chat"])
+
+TOOLS = [WEB_SEARCH_TOOL_DEFINITION] + REPO_TOOL_DEFINITIONS
+RISKY_TOOLS = {"write_file", "run_shell"} | REPO_RISKY_TOOLS
+
+
+def owns_conversation(user_id: str, conversation_id: str) -> bool:
+    """Placeholder for authenticated user-scoped conversation ownership."""
+    return True
+
+
+@router.post("/completions")
+async def chat_completions(
+    body: ChatRequest,
+    request: Request,
+    user: dict[str, Any] = Depends(current_user),
+) -> StreamingResponse:
+    """Run an authenticated tool-capable chat completion stream."""
+    trace_id = str(uuid.uuid4())
+    user_id = user["user_id"]
+
+    user_settings = get_locked_settings(user_id=user_id)
+
+    if not check_rate_limit(user_id):
+        log_event(
+            logging.WARNING,
+            "rate_limit_exceeded",
+            user_id=user_id,
+            trace_id=trace_id,
+        )
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    if body.conversation_id and not owns_conversation(
+        user_id,
+        body.conversation_id,
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    async def event_stream() -> AsyncIterator[bytes]:
+        client: httpx.AsyncClient = request.app.state.http_client
+        ready = False
+
+        async for event in ensure_backend_ready(client, trace_id):
+            yield json_line(event)
+
+            if event["type"] == "error":
+                return
+
+            if event["type"] == "progress" and event["phase"] == "ready":
+                ready = True
+
+        if not ready:
+            return
+
+        if len(body.attachments):
+            attachments = body.attachments
+            log_event(logging.INFO, "found_attachments", msg=f"Processing {len(body.attachments)} attachments", trace_id=trace_id)
+
+        messages = list(body.history) + [{"role": "user", "content": body.message}]
+
+        try:
+            first_result = await call_vllm(client, messages, tools=TOOLS, user_settings=user_settings)
+            # log_event(logging.INFO, "vllm_chat_responce", trace_id=trace_id, msg=f"vllm response: {first_result}")
+            assistant_message = first_result["choices"][0]["message"]
+        except (
+            httpx.HTTPError,
+            KeyError,
+            IndexError,
+            TypeError,
+            json.JSONDecodeError,
+        ) as exc:
+            log_event(
+                logging.ERROR,
+                "vllm_tool_planning_failed",
+                error=str(exc.__class__.__name__),
+                trace_id=trace_id,
+            )
+            yield json_line(
+                {
+                    "type": "error",
+                    "message": "Model request failed. Please retry.",
+                }
+            )
+            return
+
+        tool_calls = assistant_message.get("tool_calls") or []
+        if tool_calls:
+            messages.append(assistant_message)
+
+            for tool_call in tool_calls:
+                function = tool_call.get("function", {})
+                name = function.get("name")
+
+                try:
+                    args = json.loads(function.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    yield json_line(
+                        {
+                            "type": "error",
+                            "message": "The model produced invalid tool arguments.",
+                        }
+                    )
+                    return
+
+                if not isinstance(args, dict):
+                    yield json_line(
+                        {
+                            "type": "error",
+                            "message": "The model produced invalid tool arguments.",
+                        }
+                    )
+                    return
+
+                if not name or name not in FUNCS:
+                    yield json_line(
+                        {
+                            "type": "error",
+                            "message": f"Unknown tool requested: {name}",
+                        }
+                    )
+                    return
+
+                if name in RISKY_TOOLS:
+                    try:
+                        action_id = await create_pending_action_record(
+                            user_id,
+                            name,
+                            args,
+                            trace_id,
+                        )
+                    except (TypeError, ValueError):
+                        log_event(
+                            logging.ERROR,
+                            "pending_action_creation_failed",
+                            tool=name,
+                            trace_id=trace_id,
+                        )
+                        yield json_line(
+                            {
+                                "type": "error",
+                                "message": (
+                                    "The requested action could not be prepared. "
+                                    "Please retry."
+                                ),
+                            }
+                        )
+                        return
+
+                    yield json_line(
+                        {
+                            "type": "confirmation_required",
+                            "action_id": action_id,
+                            "tool_name": name,
+                            "args": args,
+                        }
+                    )
+                    return
+
+                try:
+                    tool_result = await call_tool(name, args, user_id)
+                except ProviderNotConnectedError as exc:
+                    log_event(
+                        logging.INFO,
+                        "provider_not_connected",
+                        provider=exc.provider,
+                        tool=name,
+                        user_id=user_id,
+                        trace_id=trace_id,
+                    )
+                    yield json_line(
+                        {
+                            "type": "error",
+                            "error": "provider_not_connected",
+                            "provider": exc.provider,
+                            "message": (
+                                f"Connect {exc.provider.capitalize()} before "
+                                "using this repository tool."
+                            ),
+                        }
+                    )
+                    return
+                except (ValueError, RuntimeError, OSError):
+                    log_event(
+                        logging.ERROR,
+                        "tool_execution_failed",
+                        tool=name,
+                        trace_id=trace_id,
+                    )
+                    yield json_line(
+                        {
+                            "type": "error",
+                            "message": (
+                                "The requested tool could not be completed. "
+                                "Please retry."
+                            ),
+                        }
+                    )
+                    return
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.get("id"),
+                        "content": str(tool_result),
+                    }
+                )
+
+        log_event(
+            logging.INFO,
+            "chat_completion_started",
+            user_id=user_id,
+            trace_id=trace_id,
+        )
+        yield json_line({"type": "answer_start"})
+
+        try:
+            async for token_event in vllm_token_stream(client, messages):
+                yield token_event
+        except httpx.HTTPError as exc:
+            log_event(
+                logging.ERROR,
+                "vllm_stream_failed",
+                error=str(exc),
+                trace_id=trace_id,
+            )
+            yield sse(
+                {
+                    "type": "error",
+                    "message": "The model stream failed. Please retry.",
+                }
+            )
+            yield b"data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

@@ -1,4 +1,3 @@
-# [FINAL]
 stages:
   - test
   - deploy
@@ -17,6 +16,23 @@ test:
     - pip install pytest flake8
     - flake8 lambda_function.py cli_agent.py cli_auth.py repo_tools.py --max-line-length=120 --extend-ignore=E203
     - if [ -d tests ]; then pytest tests/ -v; else echo "No tests directory found, skipping"; fi
+
+fastapi-test:
+  stage: test
+  image: python:3.12-slim
+  rules:
+    - changes:
+        - back-end/fast-api/**
+        - .github/workflows/fastapi-tests.yml
+        - .gitlab-ci.yml
+  before_script:
+    - cd back-end/fast-api
+    - python -m pip install --upgrade pip
+    - python -m pip install -r requirements.txt
+    - python -m pip install -r requirements-dev.txt
+  script:
+    - export INTEGRATION_TOKEN_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+    - python -m pytest -q tests
 
 deploy:
   stage: deploy
@@ -62,14 +78,60 @@ deploy:
       Ec2InstanceId=$EC2_INSTANCE_ID
       GitHubToken=$GITHUB_TOKEN
       GitLabToken=$GITLAB_TOKEN
+      GitHubOAuthClientId=$GITHUB_OAUTH_CLIENT_ID
+      GitHubOAuthClientSecret=$GITHUB_OAUTH_CLIENT_SECRET
+      DomainName=$FRONTEND_DOMAIN_NAME
+      HostedZoneId=$FRONTEND_HOSTED_ZONE_ID
     - >
       aws cloudformation describe-stacks
       --stack-name $STACK_NAME
       --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue"
       --output text
-  environment:
-    name: production
-  artifacts:
-    paths:
-      - .aws-sam/build/
-    expire_in: 1 week
+
+deploy-frontend:
+  stage: deploy
+  image: python:3.12-slim
+  needs:
+    - deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  id_tokens:
+    AWS_ID_TOKEN:
+      aud: https://gitlab.com
+  before_script:
+    - apt-get update && apt-get install -y curl unzip jq
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip -q awscliv2.zip
+    - ./aws/install
+    - >
+      export $(aws sts assume-role-with-web-identity
+      --role-arn $AWS_DEPLOY_ROLE_ARN
+      --role-session-name gitlab-ci-deploy-frontend
+      --web-identity-token $AWS_ID_TOKEN
+      --duration-seconds 3600
+      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
+      --output text | awk '{print "AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')
+  script:
+    - export AWS_DEFAULT_REGION=$AWS_REGION
+    - >
+      FUNCTION_URL=$(aws cloudformation describe-stacks
+      --stack-name $STACK_NAME
+      --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue"
+      --output text)
+    - >
+      BUCKET_NAME=$(aws cloudformation describe-stacks
+      --stack-name $STACK_NAME
+      --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue"
+      --output text)
+    - >
+      DISTRIBUTION_ID=$(aws cloudformation describe-stacks
+      --stack-name $STACK_NAME
+      --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue"
+      --output text)
+    - sed -i "s|__LAMBDA_FUNCTION_URL__|$FUNCTION_URL|g" front-end/config.js
+    - sed -i "s|__COGNITO_DOMAIN__|$COGNITO_DOMAIN|g" front-end/config.js
+    - sed -i "s|__COGNITO_CLIENT_ID__|$COGNITO_CLIENT_ID|g" front-end/config.js
+    - sed -i "s|__GITHUB_OAUTH_CLIENT_ID__|$GITHUB_OAUTH_CLIENT_ID|g" front-end/config.js
+    - sed -i "s|__GITLAB_OAUTH_CLIENT_ID__|$GITLAB_OAUTH_CLIENT_ID|g" front-end/config.js
+    - aws s3 sync front-end/ s3://$BUCKET_NAME/ --delete
+    - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*"

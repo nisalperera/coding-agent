@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+back-end/fast-api/data/*.db
+back-end/fast-api/alembic/
+back-end/fast-api/.backend/
+
+vllm-model/huggingface/
+
+mongodb/.env
+mongodb/data/
+!mongodb/data/.gitkeep
+
+mysql/.env
+mysql/data/
+!mysql/data/.gitkeep

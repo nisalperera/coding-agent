@@ -1,0 +1,11 @@
+front-end/node_modules/
+front-end/.next/
+
+back-end/__pycache__/
+back-end/.pytest_cache/
+back-end/.ruff_cache/
+back-end/.venv/
+back-end/*.pyc
+
+vllm-model/
+cli/ 

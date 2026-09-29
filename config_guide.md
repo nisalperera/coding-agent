@@ -1,201 +1,134 @@
-# AWS Configuration Guide [FINAL]
+# AWS Configuration Guide
 
-Complete setup steps for deploying the Qwen3-Coder-14B serving stack: vLLM on a T4 EC2
-instance, an authenticated Lambda-based web app, and a CLI coding agent, following
-OWASP LLM Top 10 (2026), OWASP API Security Top 10, and the Twelve-Factor App methodology.
-Includes GitHub/GitLab repo-management tools (branches, commits, PRs/MRs, issues via REST APIs).
+This is a **brief index** of every configuration area in this project. For the actual
+commands, in the correct dependency order, see **[`SETUP_GUIDE.md`](./SETUP_GUIDE.md)**.
 
----
-
-## 1. Serve Qwen3-Coder 14B on the T4 EC2 instance
-
-```bash
-pip install vllm
-
-vllm serve Qwen/Qwen3-Coder-14B-Instruct-AWQ \
-  --quantization awq \
-  --gpu-memory-utilization 0.85 \
-  --max-model-len 8192 \
-  --dtype float16 \
-  --enable-auto-tool-choice \
-  --tool-call-parser qwen3_coder
-```
-
-Notes:
-- T4 (Turing, compute capability 7.5) supports AWQ, GPTQ, Marlin, INT8 W8A8, GGUF,
-  and bitsandbytes quantization kernels. FP8 is NOT supported on T4.
-- `--tool-call-parser qwen3_coder` is mandatory for structured tool calls.
-- Confirm the security group attached to this EC2 instance allows inbound traffic on
-  port 8000 from the Lambda function's security group only (not `0.0.0.0/0`).
+The stack: vLLM serving Qwen3-Coder-14B on a T4 EC2 instance, an authenticated
+Lambda-based web app (Cognito + per-user GitHub/GitLab OAuth), and a CLI coding agent —
+following OWASP LLM Top 10 (2026), OWASP API Security Top 10, and the Twelve-Factor App
+methodology. Includes GitHub/GitLab repo-management tools (branches, commits, PRs/MRs,
+issues via REST APIs).
 
 ---
 
-## 2. Create the Cognito User Pool
+## Configuration areas
 
-```bash
-aws cognito-idp create-user-pool \
-  --pool-name coding-agent-pool \
-  --auto-verified-attributes email
-```
-
-### 2.1 Register Google as an identity provider
-
-```bash
-aws cognito-idp create-identity-provider \
-  --user-pool-id us-east-1_xxxxxxx \
-  --provider-name Google \
-  --provider-type Google \
-  --provider-details '{
-    "client_id": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
-    "client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
-    "authorize_scopes": "profile email openid"
-  }' \
-  --attribute-mapping '{"email": "email", "name": "name"}'
-```
-
-### 2.2 Register GitHub as an OIDC identity provider
-
-```bash
-aws cognito-idp create-identity-provider \
-  --user-pool-id us-east-1_xxxxxxx \
-  --provider-name GitHub \
-  --provider-type OIDC \
-  --provider-details '{
-    "client_id": "YOUR_GITHUB_CLIENT_ID",
-    "client_secret": "YOUR_GITHUB_CLIENT_SECRET",
-    "authorize_scopes": "openid user:email",
-    "oidc_issuer": "https://github.com",
-    "authorize_url": "https://github.com/login/oauth/authorize",
-    "token_url": "https://github.com/login/oauth/access_token",
-    "attributes_url": "https://api.github.com/user"
-  }' \
-  --attribute-mapping '{"email": "email", "username": "login"}'
-```
-
-Note: GitHub's OAuth implementation does not fully comply with OIDC discovery. Test early.
-
-### 2.3 Create the app client (public client, PKCE-ready)
-
-```bash
-aws cognito-idp create-user-pool-client \
-  --user-pool-id us-east-1_xxxxxxx \
-  --client-name coding-agent-client \
-  --no-generate-secret \
-  --supported-identity-providers COGNITO Google GitHub \
-  --allowed-o-auth-flows code \
-  --allowed-o-auth-scopes openid email profile \
-  --allowed-o-auth-flows-user-pool-client \
-  --callback-urls '["https://yourapp.com/callback","http://localhost:8765/callback"]' \
-  --logout-urls '["https://yourapp.com/logout","http://localhost:8765/logout"]'
-```
-
-### 2.4 Set up the Cognito Hosted UI domain
-
-```bash
-aws cognito-idp create-user-pool-domain \
-  --domain coding-agent-pool \
-  --user-pool-id us-east-1_xxxxxxx
-```
+| Area | Brief description | Step-by-step guide |
+|---|---|---|
+| **Networking** | VPC, private subnet, security group, and NAT Gateway/instance so Lambda and EC2 share a network and both have outbound internet access. | [SETUP_GUIDE.md → Step 1](./SETUP_GUIDE.md#step-1-networking--vpc-subnet-security-groups) |
+| **EC2 GPU host** | Launch a `g4dn.xlarge` (T4), install vLLM, serve Qwen3-Coder-14B-Instruct-AWQ. The Lambda auto-starts/stops this instance on demand. | [SETUP_GUIDE.md → Step 2](./SETUP_GUIDE.md#step-2-launch-the-ec2-gpu-instance-and-serve-qwen3-coder-14b) |
+| **IAM deploy roles** | OIDC trust roles for GitHub Actions and GitLab CI so `sam deploy` runs with no static AWS access keys. | [SETUP_GUIDE.md → Step 3](./SETUP_GUIDE.md#step-3-iam--oidc-deploy-roles-for-github-actions-and-gitlab-ci) |
+| **Cognito (sign-in)** | User pool + Google identity provider + app client + Hosted UI domain. GitHub is deliberately **not** federated here — see the callout in Step 4. | [SETUP_GUIDE.md → Step 4](./SETUP_GUIDE.md#step-4-amazon-cognito--user-pool-google-sign-in-app-client) |
+| **Shared repo tokens** | One GitHub PAT and one GitLab PAT used as the fallback service-level identity for `github_push_file`/`gitlab_push_file` when a user hasn't connected their own account. | [SETUP_GUIDE.md → Step 5](./SETUP_GUIDE.md#step-5-shared-githubgitlab-repo-management-tokens) |
+| **DynamoDB tables** | `pending-actions` (human-in-the-loop approvals, TTL) and `user-integrations` (per-user OAuth tokens — GitHub only; GitLab tokens never reach the backend). Created automatically by `sam deploy`; manual commands included for reference only. | [SETUP_GUIDE.md → Step 6](./SETUP_GUIDE.md#step-6-dynamodb-tables-optional--sam-creates-these-automatically-in-step-8) |
+| **Tavily API key** | Powers the agent's `web_search` tool. | [SETUP_GUIDE.md → Step 7](./SETUP_GUIDE.md#step-7-tavily-api-key) |
+| **First SAM deploy** | Creates the Lambda + Function URL, both DynamoDB tables, and the S3+CloudFront front-end hosting — using placeholder GitHub OAuth values, since the real callback URL doesn't exist yet. | [SETUP_GUIDE.md → Step 8](./SETUP_GUIDE.md#step-8-first-deploy-sam--with-placeholder-github-oauth-values) |
+| **Stack outputs** | `FunctionUrl`, `FrontendUrl`, `FrontendBucketName`, `FrontendDistributionId`. | [SETUP_GUIDE.md → Step 9](./SETUP_GUIDE.md#step-9-retrieve-stack-outputs) |
+| **Cognito callback update** | Point the app client's callback/logout URLs at the real front-end URL. | [SETUP_GUIDE.md → Step 10](./SETUP_GUIDE.md#step-10-update-the-cognito-app-client-with-the-real-front-end-url) |
+| **Connect GitHub / Connect GitLab** | Per-user repository OAuth, independent of Cognito. Once connected, actions run as that user, not the shared PAT/token — see the note below. GitHub needs a redeploy afterward with real credentials. | [SETUP_GUIDE.md → Step 11](./SETUP_GUIDE.md#step-11-register-the-per-user-connect-githubconnect-gitlab-oauth-integrations) |
+| **Custom domain (optional)** | Route 53 + free auto-validated ACM cert + CloudFront alias. HTTPS is enforced regardless of whether you use this. | [SETUP_GUIDE.md → Step 12](./SETUP_GUIDE.md#step-12-optional-custom-domain-via-an-existing-route-53-hosted-zone) |
+| **CI/CD secrets** | Full GitHub Secrets / GitLab CI variable list, with the `GITHUB_`-prefix rename explained. | [SETUP_GUIDE.md → Step 13](./SETUP_GUIDE.md#step-13-cicd-secrets--github-actions--gitlab-ci) |
+| **Push & verify** | Trigger the `test → deploy → deploy-frontend` pipeline and confirm it runs. | [SETUP_GUIDE.md → Step 14](./SETUP_GUIDE.md#step-14-push-to-main-and-verify-cicd) |
+| **Smoke test** | Five checks to confirm the whole stack actually works end-to-end. | [SETUP_GUIDE.md → Step 15](./SETUP_GUIDE.md#step-15-smoke-test) |
+| **Least-privilege IAM (optional)** | Replace the quick-start managed policies with a resource-scoped inline policy before production. | [SETUP_GUIDE.md → Step 16](./SETUP_GUIDE.md#step-16-optional-least-privilege-iam-policy-for-the-deploy-role) |
+| **CLI setup (optional)** | Local terminal-native agent, tokens via OS keyring. | [SETUP_GUIDE.md → Step 17](./SETUP_GUIDE.md#step-17-optional-cli-setup) |
 
 ---
 
-## 3. Create the DynamoDB table for human-in-the-loop pending actions
+## Local deployment (this branch only)
+
+This branch (`feature/fastapi-mysql-oauth`) targets a self-hosted local/LAN deployment
+of the coding agent as an alternative to the AWS stack described above. It uses FastAPI
+(`back-end/fast-api/main.py`), MySQL with SQLAlchemy and Alembic, direct Google OpenID
+Connect with server-side sessions, and a local/LAN OpenAI-compatible vLLM server.
+
+| AWS component | Local equivalent (this branch) |
+|---|---|
+| Lambda (`back-end/lambda_function.py`) | FastAPI app (`back-end/fast-api/main.py`) |
+| Cognito + Google federation | Direct Google OpenID Connect (`app/auth`), server-side sessions |
+| DynamoDB `pending-actions` / `user-integrations` | MySQL via SQLAlchemy + Alembic (`app/db/models.py`, `app/db/sqlalchemy_database.py`) |
+| EC2 auto-start + vLLM | Local/LAN vLLM OpenAI-compatible server (`app/services/vllm_service.py`) |
+| Shared GitHub/GitLab PAT fallback | Per-user provider OAuth, with shared tokens available only behind `ALLOW_LEGACY_PROVIDER_TOKEN_FALLBACK` for local development |
+
+Schema changes are managed by Alembic under `back-end/fast-api/alembic/`, generated from
+the SQLAlchemy models in `app/db/models.py`. Run `alembic upgrade head` against a
+configured `DATABASE_URL` to create or upgrade the local MySQL schema; application
+startup never runs DDL itself.
+
+### Encrypting stored provider tokens
+
+`user_integrations.access_token_ciphertext` and `refresh_token_ciphertext` must never
+contain plaintext tokens. `app/core/crypto.py` encrypts and decrypts provider tokens
+with a Fernet key held in `INTEGRATION_TOKEN_ENCRYPTION_KEY`. Generate a key with:
 
 ```bash
-aws dynamodb create-table \
-  --table-name pending-actions \
-  --attribute-definitions AttributeName=action_id,AttributeType=S \
-  --key-schema AttributeName=action_id,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST \
-  --time-to-live-specification "Enabled=true, AttributeName=expires_at"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
----
+Set the generated value in the local FastAPI `.env`. The helper calls
+`Settings.require_integration_encryption()` before every encryption or decryption
+operation, so a missing key blocks token storage/retrieval rather than allowing a
+plaintext fallback. Rotate a key by decrypting existing values with the old key and
+re-encrypting them with the new key; this branch does not yet include an automated
+rotation utility.
 
-## 4. GitHub / GitLab repo-management tokens
+NOTE: Do not commit this key. Use a separate key per environment and keep it stable for as
+long as ciphertext encrypted with it must remain readable.
 
-The agent can create branches, commit files, open pull/merge requests, and create issues
-via REST API endpoints only (never shell `git`/`gh`/`glab` commands). It cannot create or
-delete repositories — that capability is intentionally excluded.
-
-### 4.1 GitHub personal access token
-
-Create a fine-grained PAT scoped to the specific repositories the agent should touch, with:
-- Contents: Read and write (branches and file commits)
-- Pull requests: Read and write
-- Issues: Read and write
-
-### 4.2 GitLab personal/project access token
-
-Create a project access token with the `api` scope, scoped to specific projects.
-
-### 4.3 Store both as secrets
-
-```bash
-aws secretsmanager create-secret \
-  --name coding-agent/github-token --secret-string "YOUR_GITHUB_PAT"
-
-aws secretsmanager create-secret \
-  --name coding-agent/gitlab-token --secret-string "YOUR_GITLAB_TOKEN"
-```
-
-Reference via `{{resolve:secretsmanager:...}}` in `template.yaml` and pass as
-`GitHubToken` / `GitLabToken` parameters at deploy time.
+The AWS material elsewhere in this file remains the deployment reference for the AWS
+target. This section applies only to the local deployment architecture on this branch.
 
 ---
 
-## 5. Deploy the Lambda function (SAM)
+## How per-user repo authorization actually gets used
 
-```bash
-sam build
-sam deploy --guided
-```
+**GitHub** — Once a user clicks "Connect GitHub" (Step 11) and the OAuth exchange
+completes, `back-end/lambda_function.py`'s `call_repo_tool()` looks up that user's
+stored access token (`github_oauth.get_user_integration(user_id, "github")`) and
+passes it into `repo_tools.py`'s `github_create_branch`/`github_push_file`/
+`github_open_pull_request`/`github_create_issue` as a `github_token` kwarg — every
+commit, branch, PR, or issue those tools create is attributed to **that specific
+GitHub user**, not the shared service PAT. If a user hasn't connected their own
+account, the same functions fall back to the shared `GITHUB_TOKEN` automatically.
+Disconnecting GitHub (the 🔗 modal, or the header button) also calls the
+`disconnect_integration` Lambda action, which deletes that DynamoDB row via
+`github_oauth.delete_user_integration()` — it isn't just a local browser flag.
 
-Prompted for: `VllmEndpoint`, `UserPoolId`, `TavilyApiKey`, `SubnetId`, `SecurityGroupId`,
-`Ec2InstanceId`, `GitHubToken`, `GitLabToken`. Update `LAMBDA_URL` in `index.html` with the
-resulting Function URL.
+**GitLab** — GitLab's per-user token is a "public"/native OAuth client PKCE token that
+lives only in the browser's `localStorage`; it is never sent to the backend to be
+stored. Instead, `front-end/app.js`'s `resolvePendingAction()` attaches it (as
+`gitlab_token`) only at the moment a `gitlab_*` tool call is being approved via the
+human-in-the-loop flow, and `call_repo_tool()` passes it through to `repo_tools.py`'s
+`gitlab_*` functions for that single call only, then discards it. If the user hasn't
+connected GitLab, those calls fall back to the shared `GITLAB_TOKEN`. Disconnecting
+GitLab clears only the browser's copy, since the server never had one.
 
----
-
-## 6. Networking checklist (Lambda to EC2 over VPC)
-
-- [ ] Lambda `VpcConfig` points to the same VPC as the T4 instance.
-- [ ] Lambda security group allowed as inbound source on EC2 security group, port 8000.
-- [ ] NAT Gateway or VPC endpoints exist for Cognito JWKS, DynamoDB, EC2 API, and outbound
-      HTTPS access to api.github.com / gitlab.com.
-
----
-
-## 7. Rate limiting and quotas (OWASP API Security)
-
-```bash
-aws dynamodb create-table \
-  --table-name rate-limits \
-  --attribute-definitions AttributeName=user_id,AttributeType=S \
-  --key-schema AttributeName=user_id,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST
-```
-
-Replace the in-memory `check_rate_limit` function with reads/writes against this table.
+This applies to both provider flows via the `approve_pending` action — which is also
+where the front-end's confirmation UI (`appendConfirmation()`/`resolvePendingAction()`
+in `app.js`) renders Approve/Deny controls for every risky tool call.
 
 ---
 
-## 8. CLI setup
+## How the front-end actually consumes the streamed response
 
-```bash
-pip install -r requirements.txt
-export GITHUB_TOKEN=your_github_pat
-export GITLAB_TOKEN=your_gitlab_token
-python cli_agent.py login
-python cli_agent.py "Open a PR on my-org/my-repo adding a fix for the divide-by-zero bug"
-python cli_agent.py logout
-```
+`back-end/lambda_function.py` writes its response as a sequence of events, not one
+JSON document: zero or more `{"type":"progress", ...}` lines while `ensure_backend_ready()`
+polls a cold EC2 instance / loading vLLM, then either a single `{"type":"error"}` or
+`{"type":"confirmation_required"}` object, **or** `{"type":"answer_start"}` followed by
+`"data: {\"token\": ...}\n\n"` SSE-style chunks ending in `"data: [DONE]\n\n"`.
 
-Tokens are stored via the OS keyring, never written to plaintext files.
+`front-end/app.js`'s `consumeAgentStream()` reads `response.body` as a `ReadableStream`,
+buffers and splits on newlines, and dispatches each event to a handler as it arrives:
+progress lines update a single in-place "⏳ ..." bubble (`appendProgressMessage()`/
+`updateProgressMessage()`), an `answer_start` swaps that bubble out for a live assistant
+message that grows token-by-token, and a `confirmation_required`/`error` event renders
+the same UI `send()` already produced. `resolvePendingAction()` (the `approve_pending`
+call) intentionally still uses a plain `resp.json()` — that action never triggers
+`ensure_backend_ready()`, so the backend always returns it as one flat object.
 
 ---
 
-## 9. Repo-management tools reference
+## Repo-management tools reference
 
 | Tool | Platform | Endpoint used | Risky (needs approval)? |
 |---|---|---|---|
@@ -208,163 +141,66 @@ Tokens are stored via the OS keyring, never written to plaintext files.
 | `gitlab_open_merge_request` | GitLab | `POST /projects/:id/merge_requests` | Yes |
 | `gitlab_create_issue` | GitLab | `POST /projects/:id/issues` | Yes |
 
-All eight tools are treated as risky and routed through the same human-in-the-loop
-confirmation flow as `write_file`/`run_shell`. Repository creation and deletion are not
-implemented by design.
+All eight tools are risky and routed through the same human-in-the-loop confirmation
+flow as `write_file`/`run_shell`. Repository creation and deletion are not implemented
+by design.
 
 ---
 
-## 10. Security and standards checklist applied
+## Security and standards checklist applied
 
 - [x] OAuth 2.0 Authorization Code + PKCE
 - [x] Cognito JWT verification on every Lambda request
 - [x] Per-user rate limiting (OWASP API Security)
 - [x] Object-level authorization via `owns_conversation()` (OWASP API Security — BOLA)
-- [x] Human-in-the-loop approval for all mutating tools, including repo-management tools
-      (OWASP LLM Top 10 — Excessive Agency)
+- [x] Human-in-the-loop approval for all mutating tools (OWASP LLM Top 10 — Excessive Agency),
+      with a working front-end Approve/Deny UI (`appendConfirmation()`/`resolvePendingAction()`)
 - [x] Structured JSON logging with trace IDs
 - [x] All config/tokens via environment variables / Secrets Manager
-- [x] Lambda response streaming for real-time token output
-- [x] EC2 auto-start with bounded 2-minute startup budget and progress/retry UX
+- [x] Lambda response streaming for real-time token output, correctly consumed end-to-end
+      by the front-end's `consumeAgentStream()` (progress → answer/confirmation/error)
+- [x] EC2 auto-start with bounded 2-minute startup budget and progress/retry UX, with a
+      visible in-chat progress indicator during cold starts
 - [x] Repo-management tools use REST API endpoints only, never shell git/gh/glab commands
+- [x] Per-user GitHub OAuth tokens stored server-side in DynamoDB, GitHub client secret
+      never leaves the Lambda, and are actually used to attribute GitHub actions to the
+      connecting user instead of the shared PAT
+- [x] Per-user GitLab OAuth tokens are never stored server-side; sent per-request only
+      when approving a `gitlab_*` tool call, and used for that single call
+- [x] Disconnecting GitHub revokes the server-side DynamoDB token, not just a browser flag
+- [x] Front-end S3 bucket fully private, served only via CloudFront with OAC
+- [x] Custom-domain certificate DNS-validated automatically, no manual approval step
+- [x] HTTPS enforced end-to-end for the front-end, on both default and custom domains
+- [x] GitHub is never federated through Cognito — see SETUP_GUIDE.md Step 4's callout
+- [x] Lambda Function URL CORS explicitly allows the `authorization`/`content-type`
+      headers the front-end actually sends (see `template.yaml`'s `FunctionUrlConfig`)
 
----
+## Known gaps to close before production
 
-## 11. Known gaps to close before production
-
-- GitHub OIDC compliance with Cognito needs manual verification.
 - In-memory rate limiting must move to DynamoDB for multi-instance correctness.
-- GitHub/GitLab tokens currently use broad PAT scopes; narrow to fine-grained,
+- GitHub/GitLab tokens currently use broad PAT/OAuth scopes; narrow to fine-grained,
   repo-specific tokens before production use.
 - Add OpenTelemetry exporter configuration for full distributed tracing.
+- Per-user GitHub OAuth tokens have no refresh/expiry handling. GitLab's browser-side
+  token does have a `gitlab_refresh_token` stored, but nothing currently uses it to
+  silently refresh an expired GitLab access token — an expired token will just fail
+  the next `gitlab_*` tool approval with a 401 from GitLab's API.
+- ~~The stored per-user GitHub OAuth token is not consumed by `repo_tools.py`~~ and
+  ~~the per-user GitLab OAuth token is not wired in~~ — both **resolved**: see
+  "How per-user repo authorization actually gets used" above.
+- ~~"Disconnect GitHub" only clears local browser state~~ — **resolved**: it now calls
+  the `disconnect_integration` Lambda action, which deletes the DynamoDB row.
+- ~~`app.js`'s `send()` reads the Lambda response with a single `resp.json()` call,
+  which breaks whenever `ensure_backend_ready()` emits progress lines before the final
+  answer/confirmation~~ — **resolved**: `send()` now uses `consumeAgentStream()` to read
+  `response.body` as a stream and dispatch each event (progress / answer_start+tokens /
+  confirmation_required / error) as it arrives. See "How the front-end actually consumes
+  the streamed response" above.
+- The live-updating assistant bubble re-parses the *entire* accumulated markdown string
+  through `marked.parse()` on every single token during streaming, rather than
+  incrementally. This is correct but not maximally efficient for very long answers;
+  acceptable for a chat UI at this scale, worth revisiting if answers get much longer.
 
 ---
 
-## 12. GitHub Actions OIDC setup (no static AWS credentials)
-
-### 12.1 Create the OIDC identity provider in AWS
-
-```bash
-aws iam create-open-id-connect-provider \
-  --url https://token.actions.githubusercontent.com \
-  --client-id-list sts.amazonaws.com \
-  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
-```
-
-### 12.2 Trust policy (save as `github-trust-policy.json`)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::YOUR_AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-        "StringLike": { "token.actions.githubusercontent.com:sub": "repo:YOUR_GITHUB_ORG/YOUR_REPO_NAME:ref:refs/heads/main" }
-      }
-    }
-  ]
-}
-```
-
-### 12.3 Create the IAM role and attach deploy permissions
-
-```bash
-aws iam create-role --role-name github-actions-deploy-role \
-  --assume-role-policy-document file://github-trust-policy.json
-
-aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
-aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSLambda_FullAccess
-aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
-aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
-aws iam attach-role-policy --role-name github-actions-deploy-role --policy-arn arn:aws:iam::aws:policy/IAMFullAccess
-```
-
-Replace these broad policies with a least-privilege custom policy before production.
-
-### 12.4 Get the role ARN and add it to GitHub Secrets
-
-```bash
-aws iam get-role --role-name github-actions-deploy-role --query 'Role.Arn' --output text
-```
-
-Add as `AWS_DEPLOY_ROLE_ARN`, plus: `VLLM_ENDPOINT`, `COGNITO_USER_POOL_ID`,
-`TAVILY_API_KEY`, `VPC_SUBNET_ID`, `VPC_SECURITY_GROUP_ID`, `EC2_INSTANCE_ID`,
-`GITHUB_TOKEN`, `GITLAB_TOKEN`.
-
----
-
-## 13. GitLab CI OIDC setup (no static AWS credentials)
-
-### 13.1 Create the OIDC identity provider in AWS
-
-```bash
-aws iam create-open-id-connect-provider \
-  --url https://gitlab.com \
-  --client-id-list https://gitlab.com \
-  --thumbprint-list $(openssl s_client -servername gitlab.com -showcerts -connect gitlab.com:443 2>/dev/null | openssl x509 -fingerprint -sha1 -noout | sed 's/.*=//;s/://g' | tr 'A-F' 'a-f')
-```
-
-### 13.2 Trust policy (save as `gitlab-trust-policy.json`)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": { "Federated": "arn:aws:iam::YOUR_AWS_ACCOUNT_ID:oidc-provider/gitlab.com" },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": { "gitlab.com:aud": "https://gitlab.com" },
-        "StringLike": { "gitlab.com:sub": "project_path:YOUR_GITLAB_NAMESPACE/YOUR_PROJECT_NAME:ref_type:branch:ref:main" }
-      }
-    }
-  ]
-}
-```
-
-### 13.3 Create the IAM role and attach deploy permissions
-
-```bash
-aws iam create-role --role-name gitlab-ci-deploy-role \
-  --assume-role-policy-document file://gitlab-trust-policy.json
-
-aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
-aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/AWSLambda_FullAccess
-aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
-aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
-aws iam attach-role-policy --role-name gitlab-ci-deploy-role --policy-arn arn:aws:iam::aws:policy/IAMFullAccess
-```
-
-### 13.4 `.gitlab-ci.yml` OIDC deploy job
-
-Already implemented in the accompanying `.gitlab-ci.yml`, using `id_tokens` and
-`sts assume-role-with-web-identity`.
-
-### 13.5 Required GitLab CI/CD variables
-
-`AWS_DEPLOY_ROLE_ARN`, `VLLM_ENDPOINT`, `COGNITO_USER_POOL_ID`, `TAVILY_API_KEY`,
-`VPC_SUBNET_ID`, `VPC_SECURITY_GROUP_ID`, `EC2_INSTANCE_ID`, `GITHUB_TOKEN`,
-`GITLAB_TOKEN` — mark as masked/protected.
-
----
-
-## 14. CI/CD security checklist
-
-- [ ] GitHub OIDC trust policy scoped to `refs/heads/main` only
-- [ ] GitLab OIDC trust policy scoped to `ref_type:branch:ref:main` only
-- [ ] No static AWS access keys stored in either GitHub Secrets or GitLab CI/CD Variables
-- [ ] Deploy role permissions narrowed to least-privilege before production
-- [ ] Test stage (lint + pytest) must pass before deploy stage runs
-- [ ] Sensitive parameters (including GITHUB_TOKEN/GITLAB_TOKEN) marked as masked/protected
-
----
-
-*This document, and the accompanying code package, are marked FINAL as of the version
-delivered in this session.*
+*Configuration reference for the coding agent project.*
