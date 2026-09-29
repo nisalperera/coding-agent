@@ -230,7 +230,7 @@ class Settings:
             raise RuntimeError("Missing required environment variable: DATABASE_URL")
 
         parsed = urlparse(cls.DATABASE_URL)
-        if parsed.scheme not in {"mysql+pymysql", "postgresql"}:
+        if parsed.scheme not in {"mysql+pymysql", "postgresql+psycopg"}:
             raise RuntimeError(
                 "DATABASE_URL must use the mysql+pymysql or postgresql SQLAlchemy dialect"
             )
