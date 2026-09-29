@@ -151,7 +151,7 @@ async def handle_callback(code: str, state: str, request: Request) -> RedirectRe
         max_age=settings.SESSION_TTL_S,
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite=None,
+        samesite="none",
         path="/",
     )
     return response
