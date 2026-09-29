@@ -14,3 +14,4 @@ PyJWT
 pwdlib[argon2]
 email-validator
 pydantic-settings
+psycopg2-binary
