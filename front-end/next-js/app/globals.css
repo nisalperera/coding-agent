@@ -171,3 +171,14 @@ html, body { height: 100%; }
     right: -8px;
   }
 }
+
+.conversation-sidebar-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.conversation-sidebar-scrollbar::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background: rgba(100, 100, 100, 0.35);
+  background-clip: padding-box;
+}

@@ -15,22 +15,31 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import actions, auth, chat, health, integration, settings as app_settings
+from app.api import actions, auth, chat, health, integration, settings as app_settings, conversations
 from app.core.config import settings
-from app.db.database import assert_database_ready, dispose_database_engine
+from app.db.database import (
+    assert_database_ready,
+    dispose_database_engine,
+    dispose_mongodb_client,
+    initialize_mongodb,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     assert_database_ready()
+    await initialize_mongodb()
 
-    app.state.http_client = httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT_S)
+    app.state.http_client = httpx.AsyncClient(
+        timeout=settings.HTTP_TIMEOUT_S,
+    )
     app.state.google_discovery = None
 
     try:
         yield
     finally:
         await app.state.http_client.aclose()
+        await dispose_mongodb_client()
         dispose_database_engine()
 
 
@@ -51,3 +60,4 @@ app.include_router(chat.router)
 app.include_router(integration.router)
 app.include_router(integration.integration_status_router)
 app.include_router(app_settings.router)
+app.include_router(conversations.router)

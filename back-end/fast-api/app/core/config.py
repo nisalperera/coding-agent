@@ -96,6 +96,9 @@ class Settings:
     DATABASE_POOL_RECYCLE_S: int = int(_optional("DATABASE_POOL_RECYCLE_S", "1800"))
     DATABASE_CONNECT_TIMEOUT_S: int = int(_optional("DATABASE_CONNECT_TIMEOUT_S", "10"))
 
+    MONGODB_URI=_require("MONGODB_URI")
+    MONGODB_DATABASE=_require("MONGODB_DATABASE")
+
     JWT_SECRET = _require("JWT_SECRET")
     JWT_ALGORITHM = _optional("JWT_ALGORITHM", "HS256")
     JWT_EXPIRES_MINUTES = int(_optional("JWT_EXPIRES_MINUTES", "60"))

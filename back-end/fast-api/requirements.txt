@@ -15,3 +15,5 @@ pwdlib[argon2]
 email-validator
 pydantic-settings
 psycopg[binary]>=3.2,<4.0
+beanie==2.2.0
+pymongo==4.18

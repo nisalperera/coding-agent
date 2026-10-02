@@ -6,6 +6,8 @@ import ChatLog from "../components/ChatLog";
 import TypingIndicator from "../components/TypingIndicator";
 import Composer from "../components/Composer";
 import IntegrationsModal from "../components/IntegrationsModal";
+import ProgressModal from "../components/ProgressModal";
+import ConversationSidebar from "../components/ConversationSidebar";
 import { useTheme } from "../components/ThemeProvider";
 import { useAuth } from "../hooks/useAuth";
 import { useAttachments } from "../hooks/useAttachments";
@@ -152,14 +154,26 @@ export default function Page() {
     } = useIntegrationSettings();
 
     const {
+        conversations,
+        activeConversationId,
         messages,
         loading,
+        progress,
+        conversationsLoading,
+        conversationsError,
         send,
         appendMessage,
+        startNewConversation,
+        selectConversation,
         resolveConfirmation,
-    } = useChat();
+        retryFailedMessage,
+    } = useChat({
+        signedIn: auth.signedIn,
+    });
 
     const [integrationsOpen, setIntegrationsOpen] = useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
     const integrationVisibility = useMemo(
         () => ({
@@ -205,6 +219,40 @@ export default function Page() {
         }
     }, [hasVisibleIntegrations]);
 
+    useEffect(() => {
+        const savedSidebarCollapsed =
+            window.localStorage.getItem("conversation-sidebar-collapsed") === "true";
+
+        setSidebarCollapsed(savedSidebarCollapsed);
+    }, []);
+
+    useEffect(() => {
+        window.localStorage.setItem(
+            "conversation-sidebar-collapsed",
+            String(sidebarCollapsed),
+        );
+    }, [sidebarCollapsed]);
+
+    const handleToggleSidebar = useCallback(() => {
+        setSidebarCollapsed((previous) => !previous);
+    }, []);
+
+    const handleNewConversation = useCallback(() => {
+        const conversationId = startNewConversation();
+
+        if (conversationId) {
+            setMobileSidebarOpen(false);
+        }
+    }, [startNewConversation]);
+
+    const handleSelectConversation = useCallback(
+        (conversationId) => {
+            selectConversation(conversationId);
+            setMobileSidebarOpen(false);
+        },
+        [selectConversation],
+    );
+
     const handleUnauthenticatedIntegrationRequest = useCallback(() => {
         setIntegrationsOpen(false);
         loginWithGoogle();
@@ -219,51 +267,87 @@ export default function Page() {
     }, [hasVisibleIntegrations]);
 
     return (
-        <>
-            <Header
-                auth={auth}
-                integrations={visibleIntegrations}
-                integrationVisibility={integrationVisibility}
-                onOpenIntegrations={handleOpenIntegrations}
-                theme={theme}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+            <ConversationSidebar
+                conversations={conversations}
+                activeConversationId={activeConversationId}
+                collapsed={sidebarCollapsed}
+                mobileOpen={mobileSidebarOpen}
+                loading={loading || conversationsLoading}
+                onNewConversation={handleNewConversation}
+                onSelectConversation={handleSelectConversation}
+                onToggleCollapsed={handleToggleSidebar}
+                onCloseMobile={() => setMobileSidebarOpen(false)}
             />
 
-            <ChatLog
-                messages={messages}
-                onResolveConfirmation={resolveConfirmation}
-                dragProps={{
-                    onDragEnter: attachmentsState.onDragEnter,
-                    onDragOver: attachmentsState.onDragOver,
-                    onDragLeave: attachmentsState.onDragLeave,
-                    onDrop: attachmentsState.onDrop,
-                }}
-                dragActive={attachmentsState.dragActive && !chatDisabled}
-            />
-
-            <TypingIndicator visible={loading && !chatDisabled} />
-
-            {chatDisabled && <LlmDisabledWarning />}
-
-            {chatDisabled ? (
-                <DisabledComposer />
-            ) : (
-                <Composer
-                    attachmentsState={attachmentsState}
-                    onSend={send}
-                    loading={loading}
+            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                <Header
+                    auth={auth}
+                    integrations={visibleIntegrations}
+                    integrationVisibility={integrationVisibility}
+                    onOpenIntegrations={handleOpenIntegrations}
+                    onOpenConversationSidebar={() => setMobileSidebarOpen(true)}
+                    theme={theme}
                 />
-            )}
 
-            <IntegrationsModal
-                open={integrationsOpen && hasVisibleIntegrations}
-                onClose={() => setIntegrationsOpen(false)}
-                integrations={visibleIntegrations}
-                integrationVisibility={integrationVisibility}
-                loading={false}
-                error={false}
-                onRefresh={() => {}}
-                onUnauthenticated={handleUnauthenticatedIntegrationRequest}
-            />
-        </>
+                {conversationsError && (
+                    <div
+                        role="status"
+                        className="mx-auto w-full max-w-4xl px-4 pt-3 sm:px-6"
+                    >
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
+                            Conversation history could not be synchronized. New messages remain
+                            available in this session.
+                        </div>
+                    </div>
+                )}
+
+                <ChatLog
+                    messages={messages}
+                    loading={loading}
+                    onResolveConfirmation={resolveConfirmation}
+                    onRetryFailedMessage={retryFailedMessage}
+                    dragProps={{
+                        onDragEnter: attachmentsState.onDragEnter,
+                        onDragOver: attachmentsState.onDragOver,
+                        onDragLeave: attachmentsState.onDragLeave,
+                        onDrop: attachmentsState.onDrop,
+                    }}
+                    dragActive={attachmentsState.dragActive && !chatDisabled}
+                />
+
+                <ProgressModal
+                    open={Boolean(progress)}
+                    message={progress?.message}
+                    percent={progress?.percent}
+                />
+
+                <TypingIndicator visible={loading && !chatDisabled} />
+
+                {chatDisabled && <LlmDisabledWarning />}
+
+                {chatDisabled ? (
+                    <DisabledComposer />
+                ) : (
+                    <Composer
+                        key={activeConversationId}
+                        attachmentsState={attachmentsState}
+                        onSend={send}
+                        loading={loading}
+                    />
+                )}
+
+                <IntegrationsModal
+                    open={integrationsOpen && hasVisibleIntegrations}
+                    onClose={() => setIntegrationsOpen(false)}
+                    integrations={visibleIntegrations}
+                    integrationVisibility={integrationVisibility}
+                    loading={false}
+                    error={false}
+                    onRefresh={() => { }}
+                    onUnauthenticated={handleUnauthenticatedIntegrationRequest}
+                />
+            </div>
+        </div>
     );
 }

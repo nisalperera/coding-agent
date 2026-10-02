@@ -19,7 +19,7 @@ VLLM_HEALTH_TIMEOUT = httpx.Timeout(
     pool=5.0,
 )
 
-async def is_vllm_ready(client: httpx.AsyncClient) -> bool:
+async def is_vllm_ready(client: httpx.AsyncClient, trace_id: str) -> bool:
     endpoint = settings.VLLM_HEALTH_ENDPOINT
 
     try:
@@ -38,7 +38,7 @@ async def is_vllm_ready(client: httpx.AsyncClient) -> bool:
                 f"status_code={response.status_code}, "
                 f"ready={ready}"
             ),
-            trace_id="N/A",
+            trace_id=trace_id,
         )
 
         return ready

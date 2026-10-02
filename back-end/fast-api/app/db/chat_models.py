@@ -1,9 +1,3 @@
-"""MongoDB chat-history models.
-
-MySQL remains authoritative for users, sessions, integrations, settings,
-and pending actions. MongoDB stores conversations and their messages.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -24,9 +18,11 @@ class ContentPart(BaseModel):
     type: Literal["text", "image", "file"] = "text"
     text: str | None = None
 
-    # Reference to external storage for files or large payloads.
+    # S3 key, never embed large or binary content in MongoDB.
     storage_key: str | None = None
     mime_type: str | None = None
+    filename: str | None = None
+    size_bytes: int | None = None
 
 
 class ToolCallRecord(BaseModel):
@@ -54,8 +50,7 @@ class TokenUsageRecord(BaseModel):
 
 
 class Conversation(Document):
-    id: str = Field(default_factory=new_uuid)
-    # Exact value of MySQL users.user_id; not a MongoDB User reference.
+    conversation_id: str = Field(default_factory=new_uuid)
     user_id: str
 
     title: str | None = None
@@ -69,42 +64,36 @@ class Conversation(Document):
     updated_at: int = Field(default_factory=utc_ms)
     last_message_at: int = Field(default_factory=utc_ms)
 
-    @property
-    def conversation_id(self) -> str:
-        return self.id
-
     class Settings:
         name = "conversations"
         indexes = [
             IndexModel(
-                [("user_id", ASCENDING), ("last_message_at", DESCENDING), ("_id", ASCENDING)],
+                [
+                    ("user_id", ASCENDING),
+                    ("status", ASCENDING),
+                    ("last_message_at", DESCENDING),
+                    ("_id", ASCENDING),
+                ],
                 name="user_recent_conversations",
             ),
         ]
 
 
 class Message(Document):
-    id: str = Field(default_factory=new_uuid)
-    # Both are UUID strings. conversation_id refers to Conversation.id.
+    message_id: str = Field(default_factory=new_uuid)
     conversation_id: str
     trace_id: str | None = None
-    # Exact value of MySQL users.user_id; not a MongoDB User reference.
     user_id: str
 
     role: Literal["system", "user", "assistant", "tool"]
     content: list[ContentPart] = Field(default_factory=list)
 
-    # Assistant-requested tool calls.
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
-
-    # Populated on a tool-response message.
     tool_call_id: str | None = None
     tool_name: str | None = None
 
-    # Evidence attached to the generated answer.
     sources: list[RagSourceRecord] = Field(default_factory=list)
 
-    # Useful for correlating messages from one agent execution.
     run_id: str | None = None
     model: str | None = None
     usage: TokenUsageRecord | None = None
@@ -112,10 +101,6 @@ class Message(Document):
     error: str | None = None
 
     created_at: int = Field(default_factory=utc_ms)
-
-    @property
-    def message_id(self) -> str:
-        return self.id
 
     class Settings:
         name = "messages"
