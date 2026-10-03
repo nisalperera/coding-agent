@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import delete, select
 
 from app.db.database import db_session
-from app.db.models import PendingAction
+from app.db.models.common import PendingAction
 
 
 def create_pending_action(

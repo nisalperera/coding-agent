@@ -18,12 +18,12 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.core.logging import log_event
-from app.db.pending_actions_repository import (
+from app.db.core.pending_actions_repository import (
     create_pending_action,
     delete_pending_action,
     get_pending_action,
 )
-from app.schemas import ActionRequest
+from app.schemas.common import ActionRequest
 from app.tools.dispatch import ProviderNotConnectedError, call_tool
 
 _FORBIDDEN_PENDING_ACTION_ARGUMENTS = frozenset(

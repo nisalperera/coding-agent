@@ -89,7 +89,11 @@ function PlusIcon() {
             strokeWidth="2"
             className="h-5 w-5"
         >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m-7-7h14" />
+            <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 5v14m-7-7h14"
+            />
         </svg>
     );
 }
@@ -113,58 +117,113 @@ function CollapseIcon({ collapsed }) {
     );
 }
 
+function TrashIcon() {
+    return (
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="h-4 w-4"
+        >
+            <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4 7h16m-10 4v6m4-6v6M9 7l1-3h4l1 3m-8 0 .8 13.2A2 2 0 0 0 9.8 22h4.4a2 2 0 0 0 2-1.8L17 7"
+            />
+        </svg>
+    );
+}
+
 function ConversationButton({
     conversation,
     active,
     sidebarCollapsed,
+    loading,
     onSelectConversation,
+    onDeleteConversation,
 }) {
     const title = conversation.title || "New conversation";
 
+    const handleDelete = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDeleteConversation(conversation);
+    };
+
     return (
-        <button
-            type="button"
-            title={sidebarCollapsed ? title : undefined}
-            onClick={() => onSelectConversation(conversation.id)}
-            className={`group flex w-full min-w-0 items-center rounded-lg text-left text-sm transition ${sidebarCollapsed
-                ? "h-10 justify-center px-2"
-                : "gap-2 px-2.5 py-2"
-                } ${active
+        <div
+            className={`group flex w-full min-w-0 items-center rounded-lg text-sm transition ${active
                     ? "bg-brand-100 text-slate-900 dark:bg-indigo-200 dark:text-slate-950"
                     : "text-slate-700 hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-800"
                 }`}
         >
-            <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400"
+            <button
+                type="button"
+                title={sidebarCollapsed ? title : undefined}
+                disabled={loading}
+                onClick={() => onSelectConversation(conversation.id)}
+                className={`flex min-w-0 flex-1 items-center text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${sidebarCollapsed
+                        ? "h-10 justify-center px-2"
+                        : "gap-2 px-2.5 py-2"
+                    }`}
             >
-                <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M7 8h10M7 12h7m-7 4h5M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"
-                />
-            </svg>
+                <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    className={`h-4 w-4 shrink-0 ${active
+                            ? "text-slate-600 dark:text-slate-700"
+                            : "text-slate-500 dark:text-slate-400"
+                        }`}
+                >
+                    <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M7 8h10M7 12h7m-7 4h5M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"
+                    />
+                </svg>
+
+                {!sidebarCollapsed && (
+                    <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">
+                            {title}
+                        </span>
+
+                        <span
+                            className={`mt-0.5 block truncate text-xs ${active
+                                    ? "text-slate-600 dark:text-slate-700"
+                                    : "text-slate-500 dark:text-slate-400"
+                                }`}
+                        >
+                            {formatConversationDate(
+                                conversation.updatedAt ??
+                                conversation.createdAt,
+                            )}
+                        </span>
+                    </span>
+                )}
+            </button>
 
             {!sidebarCollapsed && (
-                <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{title}</span>
-                    <span
-                        className={`mt-0.5 block truncate text-xs ${active
-                                ? "text-slate-600 dark:text-slate-700"
-                                : "text-slate-500 dark:text-slate-400"
-                            }`}
-                    >
-                        {formatConversationDate(
-                            conversation.updatedAt ?? conversation.createdAt,
-                        )}
-                    </span>
-                </span>
+                <button
+                    type="button"
+                    aria-label={`Delete conversation: ${title}`}
+                    title="Delete conversation"
+                    disabled={loading}
+                    onClick={handleDelete}
+                    className={`mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-not-allowed disabled:opacity-40 ${active
+                            ? "text-slate-700 hover:bg-slate-950/10 hover:text-red-700 dark:text-slate-700 dark:hover:bg-slate-950/20 dark:hover:text-red-800"
+                            : "text-slate-400 opacity-0 hover:bg-red-100 hover:text-red-700 group-hover:opacity-100 group-focus-within:opacity-100 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                        }`}
+                >
+                    <TrashIcon />
+                </button>
             )}
-        </button>
+        </div>
     );
 }
 
@@ -176,6 +235,7 @@ export default function ConversationSidebar({
     loading,
     onNewConversation,
     onSelectConversation,
+    onDeleteConversation,
     onToggleCollapsed,
     onCloseMobile,
 }) {
@@ -235,7 +295,9 @@ export default function ConversationSidebar({
 
                 <button
                     type="button"
-                    aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                    aria-label={
+                        collapsed ? "Expand sidebar" : "Collapse sidebar"
+                    }
                     title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                     onClick={onToggleCollapsed}
                     className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800 md:flex"
@@ -259,35 +321,47 @@ export default function ConversationSidebar({
                 aria-label="Conversation history"
                 className="min-h-0 flex-1 overflow-y-auto p-2"
             >
-                {Object.entries(groups).map(([groupName, groupConversations]) => {
-                    if (groupConversations.length === 0) {
-                        return null;
-                    }
+                {Object.entries(groups).map(
+                    ([groupName, groupConversations]) => {
+                        if (groupConversations.length === 0) {
+                            return null;
+                        }
 
-                    return (
-                        <section key={groupName} className="mb-4 last:mb-0">
-                            {!collapsed && (
-                                <h2 className="px-2.5 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                                    {groupName}
-                                </h2>
-                            )}
+                        return (
+                            <section
+                                key={groupName}
+                                className="mb-4 last:mb-0"
+                            >
+                                {!collapsed && (
+                                    <h2 className="px-2.5 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                        {groupName}
+                                    </h2>
+                                )}
 
-                            <div className="space-y-1">
-                                {groupConversations.map((conversation) => (
-                                    <ConversationButton
-                                        key={conversation.id}
-                                        conversation={conversation}
-                                        active={
-                                            conversation.id === activeConversationId
-                                        }
-                                        sidebarCollapsed={collapsed}
-                                        onSelectConversation={onSelectConversation}
-                                    />
-                                ))}
-                            </div>
-                        </section>
-                    );
-                })}
+                                <div className="space-y-1">
+                                    {groupConversations.map((conversation) => (
+                                        <ConversationButton
+                                            key={conversation.id}
+                                            conversation={conversation}
+                                            active={
+                                                conversation.id ===
+                                                activeConversationId
+                                            }
+                                            sidebarCollapsed={collapsed}
+                                            loading={loading}
+                                            onSelectConversation={
+                                                onSelectConversation
+                                            }
+                                            onDeleteConversation={
+                                                onDeleteConversation
+                                            }
+                                        />
+                                    ))}
+                                </div>
+                            </section>
+                        );
+                    },
+                )}
             </nav>
 
             <div className="shrink-0 border-t border-slate-200 p-2 dark:border-slate-800">
@@ -296,7 +370,9 @@ export default function ConversationSidebar({
                     onClick={onToggleCollapsed}
                     className={`hidden w-full items-center rounded-lg px-2.5 py-2 text-sm text-slate-600 transition hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-800 md:flex ${collapsed ? "justify-center" : "gap-2"
                         }`}
-                    aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                    aria-label={
+                        collapsed ? "Expand sidebar" : "Collapse sidebar"
+                    }
                     title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                 >
                     <MenuIcon />

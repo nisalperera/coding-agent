@@ -6,8 +6,8 @@ from sqlalchemy import select
 from fastapi import HTTPException, status
 
 from app.core.crypto import encrypt_secret
-from app.db.models import UserSettings, current_time_ms
-from app.schemas import UserSettingsUpdateRequest
+from app.db.models.common import UserSettings, current_time_ms
+from app.schemas.common import UserSettingsUpdateRequest
 from app.db.database import db_session
 from app.core.integration_defaults import (
     DEFAULT_GITHUB_BASE_URL,

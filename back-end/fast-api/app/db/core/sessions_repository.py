@@ -7,7 +7,7 @@ from typing import Any, Optional
 from sqlalchemy import delete, select
 
 from app.core.config import settings
-from app.db.models import SessionRecord, User
+from app.db.models.common import SessionRecord, User
 from app.db.database import db_session
 
 

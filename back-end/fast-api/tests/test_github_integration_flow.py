@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.auth.dependencies import current_user
 from app.db.database import db_session
-from app.db.models import User
+from app.db.models.common import User
 from app.services.github_oauth_service import GitHubOAuthError
 from app.tools import dispatch
 from app.tools.dispatch import ProviderNotConnectedError

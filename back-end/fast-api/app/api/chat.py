@@ -26,21 +26,21 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.auth.dependencies import current_user
 from app.core.logging import log_event
 from app.core.rate_limit import check_rate_limit
 from app.core.streaming import json_line, sse
-from app.schemas import ChatRequest
+from app.schemas.common import ChatRequest
 
 from app.services.settings_service import get_locked_settings
 from app.services.backend_readiness_service import ensure_backend_ready
 from app.services.pending_actions_service import create_pending_action_record
 from app.services.vllm_service import call_vllm, vllm_token_stream
-from app.services.chat_service import owns_conversation as is_owned_conversation
-from app.services.chat_service import (
+from app.services.conversation_service import (
+    owns_conversation as is_owned_conversation,
     append_message,
     create_conversation,
     get_conversation,
@@ -84,6 +84,12 @@ async def chat_completions(
         user_id=user_id,
         conversation_id=conversation_id,
     )
+
+    if conversation is not None and conversation.status == "deleted":
+        raise HTTPException(
+            status_code=410,
+            detail="This conversation could not be found.",
+        )
 
     if not conversation:
         conversation = await create_conversation(
@@ -309,26 +315,21 @@ async def chat_completions(
         assistant_text = ""
 
         try:
-            async for token_event in vllm_token_stream(client, messages):
-                try:
-                    decoded = token_event.decode("utf-8")
+            async for stream_event in vllm_token_stream(client, messages, user_settings):
+                token_text = stream_event.get("text", "")
 
-                    if decoded.startswith("data: ") and decoded != "data: [DONE]\n\n":
-                        payload = json.loads(decoded[6:].strip())
+                if token_text:
+                    assistant_text += token_text
 
-                        token = (
-                            payload.get("choices", [{}])[0]
-                            .get("delta", {})
-                            .get("content")
-                        )
+                raw_event = stream_event.get("raw")
 
-                        if token:
-                            assistant_text += token
-                except (UnicodeDecodeError, json.JSONDecodeError, IndexError, TypeError):
-                    pass
+                if raw_event:
+                    yield raw_event
 
-                yield token_event
-            if assistant_text:
+                if stream_event.get("done"):
+                    break
+
+            if assistant_text.strip():
                 await append_message(
                     user_id=user_id,
                     conversation_id=conversation_id,
@@ -336,26 +337,77 @@ async def chat_completions(
                     text=assistant_text,
                     trace_id=trace_id,
                 )
+            else:
+                await append_message(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    text="The model completed without producing a text response.",
+                    trace_id=trace_id,
+                    status="failed",
+                    error="vLLM stream completed without assistant text.",
+                )
+
         except httpx.HTTPError as exc:
             log_event(
                 logging.ERROR,
                 "vllm_stream_failed",
                 error=str(exc),
+                user_id=user_id,
+                conversation_id=conversation_id,
                 trace_id=trace_id,
             )
+
             await append_message(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 role="assistant",
-                text="The model stream failed.",
+                text=(
+                    assistant_text
+                    if assistant_text.strip()
+                    else "Sorry, Something went wrong."
+                ),
                 trace_id=trace_id,
                 status="failed",
                 error=str(exc),
             )
+
             yield sse(
                 {
                     "type": "error",
-                    "message": "The model stream failed. Please retry.",
+                    "message": "Sorry, Something went wrong. Please retry.",
+                }
+            )
+            yield b"data: [DONE]\n\n"
+
+        except Exception as exc:
+            log_event(
+                logging.ERROR,
+                "chat_stream_unexpected_failure",
+                error=exc.__class__.__name__,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+            )
+
+            await append_message(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                text=(
+                    assistant_text
+                    if assistant_text.strip()
+                    else "The model stream failed unexpectedly."
+                ),
+                trace_id=trace_id,
+                status="failed",
+                error="Unexpected failure while reading the model stream.",
+            )
+
+            yield sse(
+                {
+                    "type": "error",
+                    "message": "The model stream failed unexpectedly. Please retry.",
                 }
             )
             yield b"data: [DONE]\n\n"
@@ -369,22 +421,3 @@ async def chat_completions(
             "X-Accel-Buffering": "no",
         },
     )
-
-@router.get("/conversations")
-async def get_conversations(
-    user: dict[str, Any] = Depends(current_user),
-) -> dict[str, Any]:
-    """Return a list of conversations for the authenticated user."""
-    user_id = user["user_id"]
-    # Placeholder: return a static list of conversations
-    conversations = [
-        {"id": "conv1", "title": "Conversation 1"},
-        {"id": "conv2", "title": "Conversation 2"},
-    ]
-    log_event(
-        logging.INFO,
-        "get_conversations",
-        user_id=user_id,
-        conversation_count=len(conversations),
-    )
-    return {"conversations": conversations}

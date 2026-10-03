@@ -8,8 +8,8 @@ from sqlalchemy import select
 
 from app.auth.dependencies import current_user
 from app.db.database import db_session
-from app.db.integrations_repository import integrations_repository
-from app.db.models import User
+from app.db.auth.integrations_repository import integrations_repository
+from app.db.models.common import User
 from main import app
 
 TEST_USER = {

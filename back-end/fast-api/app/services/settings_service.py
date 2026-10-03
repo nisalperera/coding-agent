@@ -2,18 +2,18 @@ from __future__ import annotations
 from typing import Any
 from fastapi import HTTPException, status
 
-from app.db.settings_repository import (
+from app.db.core.settings_repository import (
     get_user_settings as fetch_user_settings,
     reset_user_settings,
     update_user_settings,
     create_user_settings
 )
 
-from app.db.models import (
+from app.db.models.common import (
     UserSettings,
     User
 )
-from app.schemas import (
+from app.schemas.common import (
     UserSettingsResponse,
     GitHubIntegrationSettingsResponse,
     GitLabIntegrationSettingsResponse,

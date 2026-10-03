@@ -4,14 +4,14 @@ import time
 import uuid
 
 from app.db.database import db_session
-from app.db.models import PendingAction
-from app.db.pending_actions_repository import (
+from app.db.models.common import PendingAction
+from app.db.core.pending_actions_repository import (
     create_pending_action,
     delete_pending_action,
     get_pending_action,
     purge_expired_pending_actions,
 )
-from app.db.users_repository import upsert_google_user_claims
+from app.db.core.users_repository import upsert_google_user_claims
 
 
 def _create_user(sub: str, email: str) -> dict[str, object]:

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
-from app.db.models import User
+from app.db.models.common import User
 from app.db.database import db_session
 
 

@@ -1,15 +1,17 @@
 import re
 
+import asyncio
+
 from datetime import datetime
 
 from fastapi import HTTPException
 from fastapi.responses import Response
 
-from app.schemas import LoginRequest, UserResponse, UserSettingsResponse
+from app.schemas.common import LoginRequest, UserResponse, UserSettingsResponse
 from app.core.security import hash_password, set_auth_cookie, verify_password
-from app.db.sessions_repository import create_session
-from app.db.models import User, new_uuid
-from app.db.users_repository import get_user_by_email, get_users_count_by_prefix, put_user
+from app.db.core.sessions_repository import create_session, delete_session
+from app.db.models.common import User, new_uuid
+from app.db.core.users_repository import get_user_by_email, get_users_count_by_prefix, put_user
 from app.services.settings_service import reset_integration_settings, get_user_settings
 
 MAX_USERNAME_LENGTH = 64
@@ -43,7 +45,7 @@ async def generate_unique_username(
 
 
 async def check_if_user_exists(email: str) -> bool:
-    existing_user = await get_user_by_email(email)  # Raises HTTPException if user exists
+    existing_user = await asyncio.to_thread(get_user_by_email, email)  # Raises HTTPException if user exists
     if existing_user:
         raise HTTPException(
             status_code=409,
@@ -68,18 +70,18 @@ async def save_user(username: str, email: str, name: str, password: str, respons
             updated_at=now,
         )
     
-    saved_user = await put_user(user)  # Raises HTTPException if user exists
+    saved_user = await asyncio.to_thread(put_user, user)  # Raises HTTPException if user exists
 
-    token = create_session(user_id=user.user_id)
+    token = await asyncio.to_thread(create_session, user.user_id)
     set_auth_cookie(response, token)
-    user_settings = await reset_integration_settings(saved_user)  # Initialize default settings for the new user
+    user_settings = await asyncio.to_thread(reset_integration_settings, saved_user)  # Initialize default settings for the new user
     return saved_user, user_settings
 
 
 async def user_login(payload: LoginRequest, response: Response) -> tuple[UserResponse, UserSettingsResponse]:
     email = normalize_email(str(payload.email))
     
-    user = await get_user_by_email(email, return_password=True)  # Raises HTTPException if user does not exist
+    user = await asyncio.to_thread(get_user_by_email, email, return_password=True)  # Raises HTTPException if user does not exist
 
     hashed_password = user.pop("password_hash") if user else None
 
@@ -94,9 +96,13 @@ async def user_login(payload: LoginRequest, response: Response) -> tuple[UserRes
     if not verify_password(payload.password, hashed_password):
         raise invalid_credentials
 
-    token = create_session(user_id=user["user_id"])
+    token = await asyncio.to_thread(create_session, user["user_id"])
     set_auth_cookie(response, token)
 
-    user_settings = await get_user_settings(User(**user))  # Ensure user settings are initialized
+    user_settings = await asyncio.to_thread(get_user_settings, User(**user))  # Ensure user settings are initialized
 
     return UserResponse(**user), user_settings
+
+
+async def delete_session_to_logout(token: str):
+    await asyncio.to_thread(delete_session, token)

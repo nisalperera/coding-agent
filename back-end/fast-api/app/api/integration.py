@@ -21,11 +21,11 @@ from app.auth.integration_oauth_cookie import (
     encode_integration_oauth_callback_cookie,
 )
 from app.core.config import settings
-from app.db.integration_oauth_state_repository import (
+from app.db.auth.integration_oauth_state_repository import (
     consume_integration_oauth_state,
     save_integration_oauth_state,
 )
-from app.schemas import IntegrationsStatusResponse
+from app.schemas.common import IntegrationsStatusResponse
 from app.services.github_oauth_service import (
     GITHUB_PROVIDER,
     GitHubOAuthError,

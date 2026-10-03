@@ -3,8 +3,8 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import func, select
 
 from app.db.database import SessionLocal
-from app.db.models import User
-from app.db.users_repository import upsert_google_user_claims
+from app.db.models.common import User
+from app.db.core.users_repository import upsert_google_user_claims
 
 
 def test_concurrent_google_upserts_create_one_user(google_claims: dict[str, object]) -> None:

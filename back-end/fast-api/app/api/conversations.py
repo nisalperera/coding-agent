@@ -2,21 +2,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.auth.dependencies import current_user
-from app.conversation_schemas import (
+from app.schemas.conversations import (
     ConversationDetailResponse,
     ConversationListResponse,
     ConversationSummaryResponse,
     CreateConversationRequest,
     UpdateConversationRequest,
 )
-from app.services.chat_service import (
+from app.services.conversation_service import (
     create_conversation,
     get_conversation_detail,
     list_conversations,
     update_conversation,
+    delete_conversation as remove_conversation,
 )
 
 router = APIRouter(prefix="/v1/conversations", tags=["conversations"])
@@ -109,3 +110,27 @@ async def patch_conversation(
         "updated_at": conversation.updated_at,
         "last_message_at": conversation.last_message_at,
     }
+
+
+@router.delete(
+    "/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_conversation_by_id(
+    conversation_id: str,
+    user: dict[str, Any] = Depends(current_user),
+) -> Response:
+    """Permanently delete one authenticated user's conversation."""
+    deleted = await remove_conversation(
+        user_id=user["user_id"],
+        conversation_id=conversation_id,
+    )
+
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

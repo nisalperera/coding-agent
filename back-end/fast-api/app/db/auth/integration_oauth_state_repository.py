@@ -14,7 +14,7 @@ from typing import Final, TypedDict
 from sqlalchemy import delete, select
 
 from app.db.database import db_session
-from app.db.models import IntegrationOAuthState
+from app.db.models.common import IntegrationOAuthState
 
 SUPPORTED_INTEGRATION_PROVIDERS: Final[frozenset[str]] = frozenset(
     {"github", "gitlab"}

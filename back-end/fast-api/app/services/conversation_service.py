@@ -6,8 +6,19 @@ from typing import Any
 
 from beanie.operators import Set
 
-from app.db.chat_models import ContentPart, Conversation, Message, utc_ms
-from app.db.chat_repository import is_owned, get_conversations_by_user
+from app.db.base import current_time_ms
+from app.db.models.conversations import (
+    ContentPart, 
+    Conversation, 
+    Message, 
+    ConversationStatus, 
+    MessageStatus, 
+    ClientType,
+    ContentType,
+    Role,
+)
+
+from app.db.conversation.conversations_repository import is_owned, get_conversations_by_user
 
 
 async def owns_conversation(user_id: str, conversation_id: str) -> bool:
@@ -62,7 +73,7 @@ async def create_conversation(
         conversation_id=conversation_id,
         user_id=user_id,
         title=title or "New conversation",
-        client=client,
+        client=ClientType(client),
     )
 
     await conversation.insert()
@@ -73,10 +84,12 @@ async def get_conversation(
     *,
     user_id: str,
     conversation_id: str,
+    include_deleted: bool = False,
 ) -> Conversation | None:
     return await Conversation.find_one(
         Conversation.user_id == user_id,
         Conversation.conversation_id == conversation_id,
+        Conversation.status != ConversationStatus.DELETED or include_deleted,
     )
 
 
@@ -88,7 +101,7 @@ async def list_conversations(
     conversations = await (
         Conversation.find(
             Conversation.user_id == user_id,
-            Conversation.status == "active",
+            Conversation.status == ConversationStatus.ACTIVE,
         )
         .sort("-last_message_at", "-created_at")
         .limit(limit)
@@ -103,6 +116,7 @@ async def get_conversation_detail(
     user_id: str,
     conversation_id: str,
 ) -> dict[str, Any] | None:
+    
     conversation = await get_conversation(
         user_id=user_id,
         conversation_id=conversation_id,
@@ -145,9 +159,9 @@ async def update_conversation(
         conversation.title = title
 
     if status is not None:
-        conversation.status = status
+        conversation.status = ConversationStatus(status)
 
-    conversation.updated_at = utc_ms()
+    conversation.updated_at = current_time_ms()
     await conversation.save()
     return conversation
 
@@ -166,22 +180,23 @@ async def append_message(
     message = Message(
         user_id=user_id,
         conversation_id=conversation_id,
-        role=role,
+        role=Role(role),
         content=content
         if content is not None
-        else [ContentPart(type="text", text=text or "")],
+        else [ContentPart(type=ContentType.TEXT, text=text or "")],
         trace_id=trace_id,
-        status=status,
+        status=MessageStatus(status),
         error=error,
     )
 
     await message.insert()
 
-    now = utc_ms()
+    now = current_time_ms()
 
     await Conversation.find_one(
         Conversation.user_id == user_id,
         Conversation.conversation_id == conversation_id,
+        Conversation.status != ConversationStatus.DELETED,
     ).update(
         Set(
             {
@@ -220,5 +235,35 @@ async def set_first_prompt_title(
     )
 
     conversation.title = title
-    conversation.updated_at = utc_ms()
+    conversation.updated_at = current_time_ms()
     await conversation.save()
+
+
+async def delete_conversation(
+    *,
+    user_id: str,
+    conversation_id: str,
+) -> bool:
+    """Soft-delete one conversation owned by the authenticated user.
+
+    The Conversation and all Message records remain in MongoDB. The sidebar
+    and normal chat APIs exclude conversations marked as deleted.
+    """
+    conversation = await Conversation.find_one(
+        Conversation.user_id == user_id,
+        Conversation.conversation_id == conversation_id,
+        Conversation.status != ConversationStatus.DELETED,
+    )
+
+    if conversation is None:
+        return False
+
+    deleted_at = current_time_ms()
+
+    conversation.status = ConversationStatus.DELETED
+    conversation.deleted_at = deleted_at
+    conversation.updated_at = deleted_at
+
+    await conversation.save()
+
+    return True

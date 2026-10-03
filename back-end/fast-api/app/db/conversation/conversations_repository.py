@@ -1,5 +1,5 @@
 
-from app.db.chat_models import Conversation
+from app.db.models.conversations import Conversation
 
 
 def is_owned(user_id: str, conversation_id: str) -> bool:

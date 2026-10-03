@@ -8,6 +8,7 @@ import Composer from "../components/Composer";
 import IntegrationsModal from "../components/IntegrationsModal";
 import ProgressModal from "../components/ProgressModal";
 import ConversationSidebar from "../components/ConversationSidebar";
+import DeleteConversationModal from "../components/DeleteConversationModal";
 import { useTheme } from "../components/ThemeProvider";
 import { useAuth } from "../hooks/useAuth";
 import { useAttachments } from "../hooks/useAttachments";
@@ -165,6 +166,7 @@ export default function Page() {
         appendMessage,
         startNewConversation,
         selectConversation,
+        deleteConversation,
         resolveConfirmation,
         retryFailedMessage,
     } = useChat({
@@ -174,6 +176,11 @@ export default function Page() {
     const [integrationsOpen, setIntegrationsOpen] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+    const [conversationPendingDelete, setConversationPendingDelete] =
+        useState(null);
+    const [deletingConversation, setDeletingConversation] = useState(false);
+    const [deleteConversationError, setDeleteConversationError] = useState(null);
+
 
     const integrationVisibility = useMemo(
         () => ({
@@ -253,6 +260,55 @@ export default function Page() {
         [selectConversation],
     );
 
+    const handleDeleteConversation = useCallback((conversation) => {
+        setDeleteConversationError(null);
+        setConversationPendingDelete(conversation);
+    }, []);
+
+    const handleCloseDeleteConversationModal = useCallback(() => {
+        if (deletingConversation) {
+            return;
+        }
+
+        setDeleteConversationError(null);
+        setConversationPendingDelete(null);
+    }, [deletingConversation]);
+
+    const handleConfirmDeleteConversation = useCallback(async () => {
+        if (!conversationPendingDelete || deletingConversation) {
+            return;
+        }
+
+        setDeleteConversationError(null);
+        setDeletingConversation(true);
+
+        try {
+            const deleted = await deleteConversation(
+                conversationPendingDelete.id,
+            );
+
+            if (deleted === false) {
+                setDeleteConversationError(
+                    "The conversation could not be deleted. Please check your connection and try again.",
+                );
+                return;
+            }
+
+            setConversationPendingDelete(null);
+            setMobileSidebarOpen(false);
+        } catch {
+            setDeleteConversationError(
+                "The conversation could not be deleted. Please check your connection and try again.",
+            );
+        } finally {
+            setDeletingConversation(false);
+        }
+    }, [
+        conversationPendingDelete,
+        deleteConversation,
+        deletingConversation,
+    ]);
+
     const handleUnauthenticatedIntegrationRequest = useCallback(() => {
         setIntegrationsOpen(false);
         loginWithGoogle();
@@ -276,6 +332,7 @@ export default function Page() {
                 loading={loading || conversationsLoading}
                 onNewConversation={handleNewConversation}
                 onSelectConversation={handleSelectConversation}
+                onDeleteConversation={handleDeleteConversation}
                 onToggleCollapsed={handleToggleSidebar}
                 onCloseMobile={() => setMobileSidebarOpen(false)}
             />
@@ -346,6 +403,14 @@ export default function Page() {
                     error={false}
                     onRefresh={() => { }}
                     onUnauthenticated={handleUnauthenticatedIntegrationRequest}
+                />
+                <DeleteConversationModal
+                    open={Boolean(conversationPendingDelete)}
+                    conversation={conversationPendingDelete}
+                    deleting={deletingConversation}
+                    error={deleteConversationError}
+                    onClose={handleCloseDeleteConversationModal}
+                    onConfirm={handleConfirmDeleteConversation}
                 />
             </div>
         </div>

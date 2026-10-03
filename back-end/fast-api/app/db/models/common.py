@@ -6,18 +6,16 @@ Alembic owns schema creation and migrations; importing this module performs no D
 
 from __future__ import annotations
 
-import uuid
-from typing import Any, ClassVar, Callable
+from typing import Any, Callable
 
-from datetime import datetime, timezone
 from dataclasses import dataclass, replace
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, Float, Index, func
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, Float, Index
 from sqlalchemy.dialects.postgresql import BIGINT
 from sqlalchemy.dialects.postgresql import JSON as MySQLJSON
 from sqlalchemy.ext.mutable import MutableList
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, composite
+from sqlalchemy.orm import Mapped, mapped_column, relationship, composite
 
-from app.schemas import (
+from app.schemas.common import (
     UserSettingsUpdateRequest,
     GitHubIntegrationSettingsUpdate,
     GitLabIntegrationSettingsUpdate,
@@ -37,28 +35,14 @@ from app.core.integration_defaults import (
     DEFAULT_LLM_MODEL,
 )
 
-UUID_LENGTH = 36
-SESSION_TOKEN_HASH_LENGTH = 64
-PROVIDER_LENGTH = 32
-
-
-def new_uuid() -> str:
-    """Return a canonical UUID string suitable for CHAR(36) identifiers."""
-    return str(uuid.uuid4())
-
-
-def current_time_ms() -> int:
-    return int(datetime.now(timezone.utc).timestamp() * 1000)
-
-
-class Base(DeclarativeBase):
-    """Base metadata for MySQL/InnoDB ORM tables."""
-
-    __table_args__: ClassVar[dict[str, str]] = {
-        "mysql_engine": "InnoDB",
-        "mysql_charset": "utf8mb4",
-        "mysql_collate": "utf8mb4_unicode_ci",
-    }
+from app.db.base import (
+    new_uuid, 
+    current_time_ms, 
+    Base,
+    UUID_LENGTH,
+    SESSION_TOKEN_HASH_LENGTH,
+    PROVIDER_LENGTH,
+)
 
 
 class User(Base):

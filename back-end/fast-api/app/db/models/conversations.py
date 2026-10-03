@@ -1,21 +1,42 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
+from enum import StrEnum
 
 from beanie import Document
 from pydantic import BaseModel, Field
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
-from app.db.models import new_uuid
+from app.db.base import new_uuid, current_time_ms
 
 
-def utc_ms() -> int:
-    return int(datetime.now(timezone.utc).timestamp() * 1000)
+class ContentType(StrEnum):
+    TEXT = "text"
+    IMAGE = "image"
+    FILE = "file"
 
+class Role(StrEnum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
+
+class MessageStatus(StrEnum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class ConversationStatus(StrEnum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    DELETED = "deleted"
+
+class ClientType(StrEnum):
+    WEB = "web"
+    CLI = "cli"
 
 class ContentPart(BaseModel):
-    type: Literal["text", "image", "file"] = "text"
+    type: ContentType = ContentType.TEXT
     text: str | None = None
 
     # S3 key, never embed large or binary content in MongoDB.
@@ -54,15 +75,18 @@ class Conversation(Document):
     user_id: str
 
     title: str | None = None
-    client: Literal["web", "cli"] = "web"
-    status: Literal["active", "archived"] = "active"
+    client: ClientType = ClientType.WEB
+    status: ConversationStatus = ConversationStatus.ACTIVE
+
+    # Unix epoch milliseconds. None means the conversation is visible and usable.
+    deleted_at: int | None = None
 
     repository: str | None = None
     branch: str | None = None
 
-    created_at: int = Field(default_factory=utc_ms)
-    updated_at: int = Field(default_factory=utc_ms)
-    last_message_at: int = Field(default_factory=utc_ms)
+    created_at: int = Field(default_factory=current_time_ms)
+    updated_at: int = Field(default_factory=current_time_ms)
+    last_message_at: int = Field(default_factory=current_time_ms)
 
     class Settings:
         name = "conversations"
@@ -85,7 +109,7 @@ class Message(Document):
     trace_id: str | None = None
     user_id: str
 
-    role: Literal["system", "user", "assistant", "tool"]
+    role: Role
     content: list[ContentPart] = Field(default_factory=list)
 
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
@@ -97,10 +121,10 @@ class Message(Document):
     run_id: str | None = None
     model: str | None = None
     usage: TokenUsageRecord | None = None
-    status: Literal["completed", "failed", "cancelled"] = "completed"
+    status: MessageStatus = MessageStatus.COMPLETED
     error: str | None = None
 
-    created_at: int = Field(default_factory=utc_ms)
+    created_at: int = Field(default_factory=current_time_ms)
 
     class Settings:
         name = "messages"

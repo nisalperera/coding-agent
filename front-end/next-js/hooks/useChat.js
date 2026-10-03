@@ -1006,7 +1006,7 @@ export function useChat({ signedIn = false } = {}) {
                         ) {
                             return;
                         }
-
+                        console.log("Agent token:", JSON.stringify(token));
                         answerText += token;
 
                         if (answerId != null) {
@@ -1176,6 +1176,87 @@ export function useChat({ signedIn = false } = {}) {
         [activeConversationId, resolvePendingAction, updateMessage],
     );
 
+    const deleteConversation = useCallback(
+        async (conversationId) => {
+            if (loading || conversationsLoading) {
+                return false;
+            }
+
+            const conversation = conversations.find(
+                (item) => item.id === conversationId,
+            );
+
+            if (!conversation) {
+                return false;
+            }
+
+            try {
+                if (signedIn) {
+                    await apiFetch(
+                        `/v1/conversations/${encodeURIComponent(conversationId)}`,
+                        {
+                            method: "DELETE",
+                        },
+                    );
+                }
+
+                const remainingConversations = conversations.filter(
+                    (item) => item.id !== conversationId,
+                );
+
+                const wasActive = conversationId === activeConversationId;
+
+                setConversations(remainingConversations);
+                setProgress(null);
+
+                if (wasActive && remainingConversations.length > 0) {
+                    const nextConversation = remainingConversations[0];
+
+                    setActiveConversationId(nextConversation.id);
+
+                    try {
+                        await loadConversation(nextConversation.id);
+                    } catch (error) {
+                        const detail =
+                            error instanceof ApiError
+                                ? error.message
+                                : error?.message || String(error);
+
+                        setConversationsError(
+                            `Conversation deleted, but the next conversation could not be loaded: ${detail}`,
+                        );
+                    }
+                }
+
+                if (remainingConversations.length === 0) {
+                    await startNewConversation();
+                }
+
+                return true;
+            } catch (error) {
+                const detail =
+                    error instanceof ApiError
+                        ? error.message
+                        : error?.message || String(error);
+
+                setConversationsError(
+                    `Could not delete the conversation: ${detail}`,
+                );
+
+                return false;
+            }
+        },
+        [
+            activeConversationId,
+            conversations,
+            conversationsLoading,
+            loadConversation,
+            loading,
+            signedIn,
+            startNewConversation,
+        ],
+    );
+
     return {
         conversations,
         activeConversationId,
@@ -1188,6 +1269,7 @@ export function useChat({ signedIn = false } = {}) {
         appendMessage,
         startNewConversation,
         selectConversation,
+        deleteConversation,
         refreshConversationIndex,
         resolveConfirmation,
         retryFailedMessage,

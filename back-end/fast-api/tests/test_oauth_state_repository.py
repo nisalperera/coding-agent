@@ -4,8 +4,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from app.db.database import db_session
-from app.db.models import OAuthState
-from app.db.oauth_state_repository import consume_oauth_state, save_oauth_state
+from app.db.models.common import OAuthState
+from app.db.auth.oauth_state_repository import consume_oauth_state, save_oauth_state
 
 
 def test_save_and_consume_oauth_state_returns_verifier_once() -> None:

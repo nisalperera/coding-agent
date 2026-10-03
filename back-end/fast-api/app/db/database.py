@@ -20,7 +20,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
-from app.db.chat_models import Conversation, Message
+from app.db.models.conversations import Conversation, Message
 
 
 def _database_connect_args() -> dict[str, int]:

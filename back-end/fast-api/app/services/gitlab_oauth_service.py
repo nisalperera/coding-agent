@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.config import settings
 from app.core.crypto import TokenEncryptionError
 from app.db.database import db_session
-from app.db.integrations_repository import (
+from app.db.auth.integrations_repository import (
     IntegrationNotFoundError,
     integrations_repository,
 )
