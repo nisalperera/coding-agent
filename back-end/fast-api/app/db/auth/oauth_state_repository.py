@@ -8,7 +8,7 @@ from typing import Optional
 
 from sqlalchemy import delete, select
 
-from app.db.models import OAuthState
+from app.db.models.common import OAuthState
 from app.db.database import db_session
 
 

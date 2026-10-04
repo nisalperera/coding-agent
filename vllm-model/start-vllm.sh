@@ -27,7 +27,7 @@ ls -lh "${MODEL_PATH}"
 cmd = 'vllm serve "${MODEL_PATH}" \
     --tokenizer "${MODEL_NAME}" \
     --hf-config-path "${MODEL_NAME}" \
-    --served-model-name "${MODEL_NAME}" \
+    --served-model-name "$(basename "$MODEL_PATH")" \
     --max-model-len 8192 \
     --max-num-seqs 4 \
     --max-num-batched-tokens 8192 \

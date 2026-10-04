@@ -223,10 +223,15 @@ back-end/fast-api/.backend/
 
 vllm-model/huggingface/
 
-mongodb/.env
-mongodb/data/
+database/mongodb/.env
+database/mongodb/data/
 !mongodb/data/.gitkeep
 
-mysql/.env
-mysql/data/
+
+database/mysql/.env
+database/mysql/data/
 !mysql/data/.gitkeep
+
+database/postgresql/.env
+database/postgresql/data/
+!postgresql/data/.gitkeep

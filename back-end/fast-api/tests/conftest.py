@@ -36,12 +36,15 @@ os.environ["INTEGRATION_TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode("u
 # Test database configuration. This must point only to a disposable MySQL
 # database used by the existing cleanup fixture and test environment.
 os.environ["DATABASE_URL"] = (
-    "mysql+pymysql://coding_agent:coding_agent@localhost:3306/coding_agent"
+    "postgresql+psycopg://coding_agent:coding_agent@localhost:5432/coding_agent"
 )
 os.environ["DATABASE_POOL_SIZE"] = "5"
 os.environ["DATABASE_MAX_OVERFLOW"] = "10"
 os.environ["DATABASE_POOL_RECYCLE_S"] = "1800"
 os.environ["DATABASE_CONNECT_TIMEOUT_S"] = "10"
+
+os.environ["MONGODB_URI"] = "mongodb://coding-agent:coding-agent%40pwd@localhost:27017/"
+os.environ["MONGODB_DATABASE"] = "coding_agent"
 
 # Existing external-service test configuration.
 os.environ["TAVILY_API_KEY"] = "test-tavily-key"
@@ -72,11 +75,21 @@ os.environ["GITLAB_AUTHORIZE_URL"] = "https://gitlab.com/oauth/authorize"
 os.environ["GITLAB_TOKEN_URL"] = "https://gitlab.com/oauth/token"
 os.environ["GITLAB_USER_URL"] = "https://gitlab.com/api/v4/user"
 
+os.environ["JWT_SECRET"] = "test-jwt-secret-key-only-for-testing-0123456789"
+os.environ["JWT_ALGORITHM"] = "HS256"
+os.environ["JWT_EXPIRES_MINUTES"] = "60"
+
+os.environ["VLLM_MODEL"] = "Test-Model"
+os.environ["VLLM_ENDPOINT"] = "http://localhost:8080/v1/chat/completions"
+os.environ["VLLM_HEALTH_ENDPOINT"] = "http://localhost:8080/health"
+
+os.environ["POST_LOGIN_REDIRECT_URL"] = "http://localhost:3000/"
+
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
-from app.db.models import (
+from app.db.models.common import (
     IntegrationOAuthState,
     OAuthState,
     PendingAction,

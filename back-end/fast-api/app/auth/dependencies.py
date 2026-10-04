@@ -10,9 +10,9 @@ from typing import Any, Optional
 from fastapi import Header, HTTPException, Request
 
 from app.core.config import settings
-from app.schemas import UserSettingsResponse
-from app.db.sessions_repository import get_session_user
-from app.db.settings_repository import get_user_settings
+from app.schemas.common import UserSettingsResponse
+from app.db.core.sessions_repository import get_session_user
+from app.db.core.settings_repository import get_user_settings
 from app.services.settings_service import build_user_settings_response
 
 

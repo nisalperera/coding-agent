@@ -11,6 +11,7 @@ export default function Header({
         gitlab: false,
     },
     onOpenIntegrations,
+    onOpenConversationSidebar,
     theme,
 }) {
     const { signedIn, user, logout } = auth;
@@ -35,7 +36,7 @@ export default function Header({
 
     return (
         <header className="sticky top-0 z-20 shrink-0 border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
-            <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <div className="flex min-w-0 items-center gap-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -43,6 +44,28 @@ export default function Header({
                         alt="Nisal's Coding Agent logo"
                         className="h-8 w-8 shrink-0 rounded-lg object-cover"
                     />
+
+                    <button
+                        type="button"
+                        aria-label="Open conversation history"
+                        onClick={onOpenConversationSidebar}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 md:hidden"
+                    >
+                        <svg
+                            aria-hidden="true"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="h-5 w-5"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M4 6h16M4 12h16M4 18h16"
+                            />
+                        </svg>
+                    </button>
 
                     <div className="min-w-0">
                         <h1 className="truncate text-sm font-semibold leading-tight">

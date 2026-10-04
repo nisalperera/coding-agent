@@ -43,7 +43,7 @@ async def ensure_backend_ready(client: httpx.AsyncClient, trace_id: str) -> Asyn
     start_time = time.monotonic()
     deadline = start_time + settings.STARTUP_BUDGET_S
 
-    if await is_vllm_ready(client):
+    if await is_vllm_ready(client, trace_id=trace_id):
         yield {"type": "progress", "phase": "ready", "percent": 100, "elapsed_seconds": 0.0, "message": "Backend ready."}
         log_event(logging.INFO, "vllm_already_ready", trace_id=trace_id)
         return
@@ -55,7 +55,7 @@ async def ensure_backend_ready(client: httpx.AsyncClient, trace_id: str) -> Asyn
     }
     _try_autostart_local_vllm(trace_id)
 
-    while not await is_vllm_ready(client):
+    while not await is_vllm_ready(client, trace_id=trace_id):
         elapsed = time.monotonic() - start_time
         if time.monotonic() >= deadline:
             log_event(logging.ERROR, "vllm_ready_timeout", trace_id=trace_id)

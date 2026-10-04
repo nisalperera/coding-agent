@@ -4,8 +4,8 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import func, select
 
-from app.db.models import User
-from app.db.users_repository import get_user_by_id, upsert_google_user_claims
+from app.db.models.common import User
+from app.db.core.users_repository import get_user_by_id, upsert_google_user_claims
 
 
 def test_upsert_google_user_creates_verified_user(google_claims: dict[str, object], db) -> None:

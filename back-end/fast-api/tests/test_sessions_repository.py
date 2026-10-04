@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import time
 
-from sqlalchemy import select
-
-from app.core.config import settings
 from app.db.database import db_session
-from app.db.models import SessionRecord
-from app.db.sessions_repository import (
+from app.db.models.common import SessionRecord
+from app.db.core.sessions_repository import (
     create_session,
     delete_session,
     get_session_user,
     hash_session_token,
     purge_expired_sessions,
 )
-from app.db.users_repository import upsert_google_user_claims
+from app.db.core.users_repository import upsert_google_user_claims
 
 
 def test_hash_session_token_is_sha256_hex_digest() -> None:

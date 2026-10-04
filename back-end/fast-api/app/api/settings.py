@@ -5,10 +5,10 @@ from fastapi import HTTPException, status
 from fastapi import APIRouter, Depends
 from app.auth.dependencies import current_user
 
-from app.schemas import UserSettingsResponse, UserSettingsUpdateRequest
+from app.schemas.common import UserSettingsResponse, UserSettingsUpdateRequest
 from app.services.settings_service import reset_integration_settings, update_integration_settings as update_settings
 
-from app.db.models import User
+from app.db.models.common import User
 
 router = APIRouter(
     prefix="/v1",

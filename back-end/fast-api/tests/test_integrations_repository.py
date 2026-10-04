@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.core import crypto
 from app.core.crypto import TokenEncryptionError, decrypt_token
-from app.db.integrations_repository import (
+from app.db.auth.integrations_repository import (
     IntegrationCredentialError,
     IntegrationNotFoundError,
     integrations_repository,
 )
-from app.db.users_repository import upsert_google_user_claims
+from app.db.core.users_repository import upsert_google_user_claims
 
 TEST_ENCRYPTION_KEY = Fernet.generate_key().decode("utf-8")
 

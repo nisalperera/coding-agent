@@ -6,11 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from app.db.database import db_session
-from app.db.integration_oauth_state_repository import (
+from app.db.auth.integration_oauth_state_repository import (
     consume_integration_oauth_state,
     save_integration_oauth_state,
 )
-from app.db.models import IntegrationOAuthState, User
+from app.db.models.common import IntegrationOAuthState, User
 
 
 def create_user(user_id: str) -> None:

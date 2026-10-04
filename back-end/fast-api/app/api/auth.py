@@ -5,7 +5,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import Response, JSONResponse, RedirectResponse
 
-from app.schemas import (
+from app.schemas.common import (
     RegisterRequest, 
     LoginRequest, 
     UserResponse, 
@@ -17,11 +17,16 @@ from app.schemas import (
 )
 from app.auth.dependencies import current_user, current_user_settings
 from app.core.config import settings
-from app.db.models import UserSettings
-from app.db.sessions_repository import delete_session
+from app.db.models.common import UserSettings
 from app.services.google_oauth_service import build_login_redirect, handle_callback
-from app.services.uname_password_login_service import generate_unique_username, normalize_email
-from app.services.uname_password_login_service import check_if_user_exists, save_user, user_login
+from app.services.login_service import (
+    generate_unique_username, 
+    normalize_email, 
+    check_if_user_exists, 
+    save_user, 
+    user_login,
+    delete_session_to_logout
+)
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -48,7 +53,7 @@ async def logout(request: Request, authorization: Optional[str] = Header(default
         token = request.cookies.get(settings.SESSION_COOKIE_NAME)
 
     if token:
-        await asyncio.to_thread(delete_session, token)
+        await delete_session_to_logout(token)
 
     response = JSONResponse({"logged_out": True})
     response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/")

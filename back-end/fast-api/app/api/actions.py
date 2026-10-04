@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from app.auth.dependencies import current_user
 from app.core.logging import log_event
 from app.core.rate_limit import check_rate_limit
-from app.schemas import ActionRequest
+from app.schemas.common import ActionRequest
 from app.services.github_oauth_service import (
     GITHUB_PROVIDER,
     GitHubOAuthError,

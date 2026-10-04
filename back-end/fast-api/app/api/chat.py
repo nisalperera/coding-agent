@@ -21,25 +21,32 @@ from __future__ import annotations
 
 import json
 import logging
-from urllib import response
-from urllib import response
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.auth.dependencies import current_user
 from app.core.logging import log_event
 from app.core.rate_limit import check_rate_limit
 from app.core.streaming import json_line, sse
-from app.schemas import ChatRequest
+from app.schemas.common import ChatRequest
+
 from app.services.settings_service import get_locked_settings
 from app.services.backend_readiness_service import ensure_backend_ready
 from app.services.pending_actions_service import create_pending_action_record
 from app.services.vllm_service import call_vllm, vllm_token_stream
+from app.services.conversation_service import (
+    owns_conversation as is_owned_conversation,
+    append_message,
+    create_conversation,
+    get_conversation,
+    set_first_prompt_title,
+)
+
 from app.tools.dispatch import FUNCS, ProviderNotConnectedError, call_tool
 from app.tools.repo_tools import REPO_RISKY_TOOLS, REPO_TOOL_DEFINITIONS
 from app.tools.web_search import WEB_SEARCH_TOOL_DEFINITION
@@ -50,9 +57,9 @@ TOOLS = [WEB_SEARCH_TOOL_DEFINITION] + REPO_TOOL_DEFINITIONS
 RISKY_TOOLS = {"write_file", "run_shell"} | REPO_RISKY_TOOLS
 
 
-def owns_conversation(user_id: str, conversation_id: str) -> bool:
+async def owns_conversation(user_id: str, conversation_id: str) -> bool:
     """Placeholder for authenticated user-scoped conversation ownership."""
-    return True
+    return await is_owned_conversation(user_id, conversation_id)
 
 
 @router.post("/completions")
@@ -65,6 +72,33 @@ async def chat_completions(
     trace_id = str(uuid.uuid4())
     user_id = user["user_id"]
 
+    conversation_id = body.conversation_id
+
+    if not conversation_id:
+        raise HTTPException(
+            status_code=400,
+            detail="conversation_id is required",
+        )
+
+    conversation = await get_conversation(
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+
+    if conversation is not None and conversation.status == "deleted":
+        raise HTTPException(
+            status_code=410,
+            detail="This conversation could not be found.",
+        )
+
+    if not conversation:
+        conversation = await create_conversation(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            title="New conversation",
+            client="web",
+        )
+
     user_settings = get_locked_settings(user_id=user_id)
 
     if not check_rate_limit(user_id):
@@ -76,37 +110,56 @@ async def chat_completions(
         )
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
-    if body.conversation_id and not owns_conversation(
-        user_id,
-        body.conversation_id,
-    ):
-        raise HTTPException(status_code=403, detail="Forbidden")
 
     async def event_stream() -> AsyncIterator[bytes]:
+        
         client: httpx.AsyncClient = request.app.state.http_client
-        ready = False
 
-        async for event in ensure_backend_ready(client, trace_id):
-            yield json_line(event)
+        log_event(
+            logging.INFO,
+            "chat_request_received",
+            user_id=user_id,
+            trace_id=trace_id,
+            chat_history_length=len(body.history),
+        )
 
-            if event["type"] == "error":
+        if len(body.history) == 0:
+            ready = False
+
+            async for event in ensure_backend_ready(client, trace_id):
+                yield json_line(event)
+
+                if event["type"] == "error":
+                    return
+
+                if event["type"] == "progress" and event["phase"] == "ready":
+                    ready = True
+
+            if not ready:
                 return
-
-            if event["type"] == "progress" and event["phase"] == "ready":
-                ready = True
-
-        if not ready:
-            return
 
         if len(body.attachments):
             attachments = body.attachments
-            log_event(logging.INFO, "found_attachments", msg=f"Processing {len(body.attachments)} attachments", trace_id=trace_id)
+            log_event(logging.INFO, "found_attachments", msg=f"Processing {len(attachments)} attachments", trace_id=trace_id)
+
+        await append_message(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            role="user",
+            text=body.message,
+            trace_id=trace_id,
+        )
+
+        await set_first_prompt_title(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            prompt=body.message,
+        )
 
         messages = list(body.history) + [{"role": "user", "content": body.message}]
 
         try:
             first_result = await call_vllm(client, messages, tools=TOOLS, user_settings=user_settings)
-            # log_event(logging.INFO, "vllm_chat_responce", trace_id=trace_id, msg=f"vllm response: {first_result}")
             assistant_message = first_result["choices"][0]["message"]
         except (
             httpx.HTTPError,
@@ -259,20 +312,102 @@ async def chat_completions(
         )
         yield json_line({"type": "answer_start"})
 
+        assistant_text = ""
+
         try:
-            async for token_event in vllm_token_stream(client, messages):
-                yield token_event
+            async for stream_event in vllm_token_stream(client, messages, user_settings):
+                token_text = stream_event.get("text", "")
+
+                if token_text:
+                    assistant_text += token_text
+
+                raw_event = stream_event.get("raw")
+
+                if raw_event:
+                    yield raw_event
+
+                if stream_event.get("done"):
+                    break
+
+            if assistant_text.strip():
+                await append_message(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    text=assistant_text,
+                    trace_id=trace_id,
+                )
+            else:
+                await append_message(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    text="The model completed without producing a text response.",
+                    trace_id=trace_id,
+                    status="failed",
+                    error="vLLM stream completed without assistant text.",
+                )
+
         except httpx.HTTPError as exc:
             log_event(
                 logging.ERROR,
                 "vllm_stream_failed",
                 error=str(exc),
+                user_id=user_id,
+                conversation_id=conversation_id,
                 trace_id=trace_id,
             )
+
+            await append_message(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                text=(
+                    assistant_text
+                    if assistant_text.strip()
+                    else "Sorry, Something went wrong."
+                ),
+                trace_id=trace_id,
+                status="failed",
+                error=str(exc),
+            )
+
             yield sse(
                 {
                     "type": "error",
-                    "message": "The model stream failed. Please retry.",
+                    "message": "Sorry, Something went wrong. Please retry.",
+                }
+            )
+            yield b"data: [DONE]\n\n"
+
+        except Exception as exc:
+            log_event(
+                logging.ERROR,
+                "chat_stream_unexpected_failure",
+                error=exc.__class__.__name__,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+            )
+
+            await append_message(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                text=(
+                    assistant_text
+                    if assistant_text.strip()
+                    else "The model stream failed unexpectedly."
+                ),
+                trace_id=trace_id,
+                status="failed",
+                error="Unexpected failure while reading the model stream.",
+            )
+
+            yield sse(
+                {
+                    "type": "error",
+                    "message": "The model stream failed unexpectedly. Please retry.",
                 }
             )
             yield b"data: [DONE]\n\n"

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.crypto import TokenEncryptionError, decrypt_token, encrypt_token
-from app.db.models import UserIntegration
+from app.db.models.common import UserIntegration
 
 SUPPORTED_PROVIDERS: Final[frozenset[str]] = frozenset({"github", "gitlab"})
 _UNSET: Final[object] = object()

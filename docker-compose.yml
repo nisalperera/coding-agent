@@ -24,30 +24,53 @@ services:
     #     dns:
     #         - 192.168.1.15
     #         - 1.1.1.1
+    
+    postgresql:
+        image: postgres:13
+        container_name: postgresql
+        restart: unless-stopped
 
-    # mongodb:
-    #     image: mongo:latest
-    #     container_name: mongodb
-    #     restart: always
-    #     ports:
-    #         - "27017:27017"
-    #     env_file:
-    #         - ./mongodb/.env
-    #     volumes:
-    #         - ./mongodb/data:/data/db
-    #     healthcheck:
-    #         test: 
-    #             - "CMD-SHELL"
-    #             - "mongosh --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval 'db.runCommand({ping:1})' --quiet"
-    #         interval: 5s
-    #         timeout: 5s
-    #         retries: 30
-    #         start_period: 30s
-    #     network_mode: host
-    #     ipc: host
-    #     dns:
-    #         - 192.168.1.15
-    #         - 1.1.1.1
+        env_file:
+            - ./database/postgresql/.env
+
+        volumes:
+            - ./database/postgresql/data:/var/lib/postgresql/data
+        healthcheck:
+            test:
+            - CMD-SHELL
+            - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -h 127.0.0.1
+            interval: 5s
+            timeout: 5s
+            retries: 30
+            start_period: 30s
+        network_mode: host
+        ipc: host
+        dns:
+            - 192.168.1.15
+            - 1.1.1.1
+    mongodb:
+        image: mongo:latest
+        container_name: mongodb
+        restart: always
+        ports:
+            - "27017:27017"
+        env_file:
+            - ./database/mongodb/.env
+        volumes:
+            - ./database/mongodb/data:/data/db
+        healthcheck:
+            test: 
+                - "CMD-SHELL"
+                - "mongosh --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval 'db.runCommand({ping:1})' --quiet"
+            interval: 5s
+            timeout: 5s
+            retries: 30
+            start_period: 30s
+        network_mode: host
+        ipc: host
+        dns:
+            - 192.168.1.15
+            - 1.1.1.1
 
     migrate:
         build:
@@ -77,7 +100,7 @@ services:
         network_mode: host
         ipc: host
         env_file:
-            - vllm-model/.env
+            - ./vllm-model/.env
         volumes:
             - ./vllm-model/huggingface:/root/.cache/huggingface
         deploy:
@@ -115,8 +138,8 @@ services:
             #     condition: service_healthy
             migrate:
                 condition: service_completed_successfully
-            vllm:
-                condition: service_healthy
+            # vllm:
+            #     condition: service_healthy
         network_mode: host
         ipc: host
         dns:

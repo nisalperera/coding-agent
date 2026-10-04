@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.streaming import sse
 from app.core.logging import log_event
 
-from app.db.models import UserSettings
+from app.db.models.common import UserSettings
 
 VLLM_HEALTH_TIMEOUT = httpx.Timeout(
     connect=15.0,
@@ -19,7 +19,39 @@ VLLM_HEALTH_TIMEOUT = httpx.Timeout(
     pool=5.0,
 )
 
-async def is_vllm_ready(client: httpx.AsyncClient) -> bool:
+
+def _extract_delta_text(payload: dict[str, Any]) -> str:
+    """Extract assistant text from an OpenAI-compatible stream payload."""
+    choices = payload.get("choices")
+
+    if not isinstance(choices, list) or not choices:
+        return ""
+
+    first_choice = choices[0]
+
+    if not isinstance(first_choice, dict):
+        return ""
+
+    delta = first_choice.get("delta")
+
+    if not isinstance(delta, dict):
+        return ""
+
+    content = delta.get("content")
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        return "".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
+        )
+
+    return ""
+
+async def is_vllm_ready(client: httpx.AsyncClient, trace_id: str) -> bool:
     endpoint = settings.VLLM_HEALTH_ENDPOINT
 
     try:
@@ -38,7 +70,7 @@ async def is_vllm_ready(client: httpx.AsyncClient) -> bool:
                 f"status_code={response.status_code}, "
                 f"ready={ready}"
             ),
-            trace_id="N/A",
+            trace_id=trace_id,
         )
 
         return ready
@@ -128,20 +160,57 @@ async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], u
     return response.json()
 
 
-async def vllm_token_stream(client: httpx.AsyncClient, messages: list[dict[str, Any]]) -> AsyncIterator[bytes]:
-    payload = {"model": settings.MODEL_NAME, "messages": messages, "stream": True}
-    async with client.stream("POST", settings.VLLM_ENDPOINT, json=payload) as response:
+async def vllm_token_stream(
+    client: httpx.AsyncClient,
+    messages: list[dict[str, Any]],
+    user_settings: UserSettings,
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream vLLM tokens and expose a parsed text delta for persistence.
+
+    `raw` is forwarded unchanged to the browser.
+    `text` contains only extracted assistant text.
+    """
+    request_payload = {
+        "model": user_settings.llm_model,
+        "messages": messages,
+        "stream": True,
+    }
+
+    async with client.stream(
+        "POST",
+        user_settings.llm_endpoint_url,
+        json=request_payload,
+        headers={"Accept": "text/event-stream"},
+    ) as response:
         response.raise_for_status()
-        async for line in response.aiter_lines():
-            if not line.startswith("data: "):
+
+        async for raw_line in response.aiter_lines():
+            if not raw_line:
                 continue
-            data = line[6:]
+
+            if not raw_line.startswith("data:"):
+                continue
+
+            data = raw_line[5:].strip()
+
             if data == "[DONE]":
-                break
+                yield {
+                    "raw": b"data: [DONE]\n\n",
+                    "text": "",
+                    "done": True,
+                }
+                return
+
             try:
-                delta = json.loads(data)["choices"][0]["delta"].get("content", "")
-            except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                payload = json.loads(data)
+            except json.JSONDecodeError:
                 continue
-            if delta:
-                yield sse({"token": delta})
-    yield b"data: [DONE]\n\n"
+
+            if not isinstance(payload, dict):
+                continue
+
+            yield {
+                "raw": sse(payload),
+                "text": _extract_delta_text(payload),
+                "done": False,
+            }

@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from app.auth.dependencies import current_user
 from app.db.database import db_session
-from app.db.models import IntegrationOAuthState, User
+from app.db.models.common import IntegrationOAuthState, User
 from app.services.github_oauth_service import GITHUB_PROVIDER
 from main import app
 
