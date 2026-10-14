@@ -28,7 +28,7 @@ ls -lh "${MODEL_PATH}"
 set -- vllm serve "${MODEL_PATH}" \
     --tokenizer "${MODEL_NAME}" \
     --hf-config-path "${MODEL_NAME}" \
-    --served-model-name "$(basename "${MODEL_PATH}")" \
+    --served-model-name "${GGUF_REPO}" \
     --max-model-len 8192 \
     --max-num-seqs 4 \
     --max-num-batched-tokens 8192 \

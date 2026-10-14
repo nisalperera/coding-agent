@@ -8,7 +8,7 @@ DEFAULT_LLM_STREAM_RESPONSES = True
 
 DEFAULT_LLM_PROVIDER_NAME="Custom"
 DEFAULT_LLM_ENDPOINT_URL="https://llm.nisalchperera.com/v1/chat/completions"
-DEFAULT_LLM_MODEL="Qwen2.5-Coder-14b"
+DEFAULT_LLM_MODEL="Qwen/Qwen2.5-Coder-7B-Instruct-GGUF"
 
 UPDATABLE_USER_SETTINGS_FIELDS = frozenset(
     {
