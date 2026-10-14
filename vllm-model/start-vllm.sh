@@ -12,6 +12,7 @@ mkdir -p "${HF_HOME}"
 
 if [ ! -s "${MODEL_PATH}" ]; then
     echo "Downloading ${MODEL_FILE} from ${GGUF_REPO}"
+
     hf download "${GGUF_REPO}" \
         --include "${MODEL_FILE}" \
         --local-dir "${HF_HOME}"
@@ -24,10 +25,10 @@ fi
 
 ls -lh "${MODEL_PATH}"
 
-cmd = 'vllm serve "${MODEL_PATH}" \
+set -- vllm serve "${MODEL_PATH}" \
     --tokenizer "${MODEL_NAME}" \
     --hf-config-path "${MODEL_NAME}" \
-    --served-model-name "$(basename "$MODEL_PATH")" \
+    --served-model-name "$(basename "${MODEL_PATH}")" \
     --max-model-len 8192 \
     --max-num-seqs 4 \
     --max-num-batched-tokens 8192 \
@@ -36,8 +37,10 @@ cmd = 'vllm serve "${MODEL_PATH}" \
     --enable-auto-tool-choice \
     --tool-call-parser hermes \
     --host 127.0.0.1 \
-    --port 9000'
+    --port 9000
 
-echo "Running command: cmd"
+printf 'Running command:'
+printf ' <%s>' "$@"
+printf '\n'
 
-exec cmd
+exec "$@"

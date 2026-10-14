@@ -28,6 +28,8 @@ COPY start-vllm.sh /usr/local/bin/start-vllm.sh
 
 RUN chmod +x /usr/local/bin/start-vllm.sh
 
+RUN ls /usr/local/bin/*.sh
+
 ENV MODEL_NAME=${MODEL_NAME} \
     MODEL_FILE=${MODEL_FILE}
 

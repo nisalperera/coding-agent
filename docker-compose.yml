@@ -78,9 +78,9 @@ services:
         env_file:
             - ./back-end/fast-api/.env
         command: [ "alembic", "upgrade", "head" ]
-        # depends_on:
-        #     mysql:
-        #         condition: service_healthy
+        depends_on:
+            postgresql:
+                condition: service_healthy
         restart: "no"
         network_mode: host
         ipc: host
@@ -134,10 +134,12 @@ services:
         volumes:
             - ./back-end/fast-api:/code
         depends_on:
-            # mysql:
-            #     condition: service_healthy
+            postgresql:
+                condition: service_healthy
             migrate:
                 condition: service_completed_successfully
+            mongodb:
+                condition: service_healthy
             # vllm:
             #     condition: service_healthy
         network_mode: host

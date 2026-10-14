@@ -2,6 +2,11 @@ import './globals.css';
 import 'highlight.js/styles/github-dark.css';
 import { ThemeProvider } from '../components/ThemeProvider';
 
+// @next-codemod-ignore Cache Components adoption: this segment temporarily allows blocking.
+// Remove this opt-out after verifying the segment passes validation without it.
+// See: https://nextjs.org/docs/app/guides/migrating-to-cache-components
+// export const instant = false;
+
 export const metadata = {
     title: "Nisal's Coding Agent",
     description: 'Agentic coding assistant with repo-aware tools and RAG-backed answers.',

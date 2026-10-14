@@ -1,4 +1,3 @@
-// components/ThemeProvider.jsx
 "use client";
 
 import {
@@ -12,23 +11,48 @@ import {
 
 const ThemeContext = createContext(null);
 
+function normalizeTheme(value) {
+    return value === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+    document.documentElement.classList.toggle(
+        "dark",
+        theme === "dark",
+    );
+}
+
 export function ThemeProvider({ children }) {
     const [theme, setThemeState] = useState("light");
 
     useEffect(() => {
-        const savedTheme =
-            window.localStorage.getItem("theme") === "dark"
-                ? "dark"
-                : "light";
+        let savedTheme = "light";
 
+        try {
+            savedTheme = normalizeTheme(
+                window.localStorage.getItem("theme"),
+            );
+        } catch {
+            // Keep the default when browser storage is unavailable.
+        }
+
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Restore the browser-only theme after hydration.
         setThemeState(savedTheme);
-        document.documentElement.classList.toggle("dark", savedTheme === "dark");
+
+        applyTheme(savedTheme);
     }, []);
 
     const setTheme = useCallback((nextTheme) => {
-        setThemeState(nextTheme);
-        window.localStorage.setItem("theme", nextTheme);
-        document.documentElement.classList.toggle("dark", nextTheme === "dark");
+        const normalizedTheme = normalizeTheme(nextTheme);
+
+        setThemeState(normalizedTheme);
+        applyTheme(normalizedTheme);
+
+        try {
+            window.localStorage.setItem("theme", normalizedTheme);
+        } catch {
+            // Theme changes still work without persistent storage.
+        }
     }, []);
 
     const toggleTheme = useCallback(() => {

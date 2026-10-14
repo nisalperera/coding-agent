@@ -210,16 +210,19 @@ function isNotFoundError(error) {
 }
 
 export function useChat({ signedIn = false } = {}) {
-    const initialConversationRef = useRef(createLocalConversation());
     const streamConversationIdRef = useRef(null);
     const loadRequestRef = useRef(0);
 
-    const [conversations, setConversations] = useState([
-        initialConversationRef.current,
-    ]);
-    const [activeConversationId, setActiveConversationId] = useState(
-        initialConversationRef.current.id,
+    const [initialConversation] = useState(createLocalConversation);
+
+    const [conversations, setConversations] = useState(
+        () => [initialConversation],
     );
+
+    const [activeConversationId, setActiveConversationId] = useState(
+        () => initialConversation.id,
+    );
+
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState(null);
     const [conversationsLoading, setConversationsLoading] = useState(false);

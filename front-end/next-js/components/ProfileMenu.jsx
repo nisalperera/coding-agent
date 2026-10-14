@@ -20,10 +20,6 @@ function Avatar({ name, email, image, large = false }) {
     const [imageFailed, setImageFailed] = useState(false);
     const initials = getInitials(name, email);
 
-    useEffect(() => {
-        setImageFailed(false);
-    }, [image]);
-
     return (
         <span
             className={`${styles.avatar} ${large ? styles.avatarLarge : ""}`}
@@ -101,7 +97,7 @@ export default function ProfileMenu({ user, onLogout }) {
                 aria-controls="profile-menu-panel"
                 onClick={() => setOpen((current) => !current)}
             >
-                <Avatar name={name} email={email} image={image} />
+                <Avatar key={image || "no-image"} name={name} email={email} image={image} />
             </button>
 
             {open && (
@@ -112,7 +108,7 @@ export default function ProfileMenu({ user, onLogout }) {
                     aria-label="Account menu"
                 >
                     <div className={styles.identity}>
-                        <Avatar name={name} email={email} image={image} large />
+                        <Avatar key={image || "no-image"} name={name} email={email} image={image} large />
 
                         <div className={styles.identityText}>
                             <strong>{name}</strong>
