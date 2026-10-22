@@ -56,3 +56,16 @@ Do not commit the key. Keep a separate, stable key for each environment while an
 ciphertext encrypted with it remains stored. See the
 [local deployment section in `config_guide.md`](./config_guide.md#local-deployment-this-branch-only)
 for the architecture, database migration, and key-rotation details.
+
+
+<!-- deliverable-1-projects-frontend -->
+## Projects frontend (Deliverable 1 review)
+
+The project frontend adds `/projects`, project overview, and general settings.
+It requires the proposed project API in
+`front-end/next-js/PROJECTS_API_CONTRACT.md`. Missing backend support is displayed
+as unavailable; no project data is simulated or saved locally.
+
+See `front-end/next-js/DELIVERABLE_1_FRONTEND.md` for validation commands,
+limitations, and tracking. This is not the full backend Deliverable 1 and does
+not implement project chat, uploads, skills, or storage.

@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { emptyDraft, validateDraft, toPayload, isDirty, parseProject, technologyLabels } from '../lib/project-domain.mjs';
+const project = { ...emptyDraft(), id: 'p1', name: 'Compiler', revision: 1, status: 'active', project_type: 'general', languages: ['cpp'] };
+test('empty names and missing type are rejected', () => assert.deepEqual(Object.keys(validateDraft(emptyDraft())), ['name', 'project_type']));
+test('general C++ is valid without web frameworks', () => assert.deepEqual(validateDraft(project), {}));
+test('unsupported type is rejected', () => assert.ok(validateDraft({ ...project, project_type: 'desktop' }).project_type));
+test('framework selection does not infer language', () => assert.deepEqual(toPayload({ ...project, languages: [], frameworks: ['nextjs'] }).languages, []));
+test('payload trims names and deduplicates selections', () => assert.deepEqual(toPayload({ ...project, name: ' X ', languages: ['python', 'cpp', 'cpp'] }).languages, ['cpp', 'python']));
+test('selection order is not a dirty change', () => assert.equal(isDirty({ ...project, languages: ['python', 'cpp'] }, { ...project, languages: ['cpp', 'python'] }), false));
+test('name edit is dirty', () => assert.equal(isDirty({ ...project, name: 'Changed' }, project), true));
+test('project response requires revision', () => assert.throws(() => parseProject({ ...project, revision: undefined })));
+test('unknown technologies fail closed', () => assert.throws(() => parseProject({ ...project, frameworks: ['unknown'] })));
+test('deleted state is recognized for caller eligibility checks', () => assert.equal(parseProject({ ...project, status: 'deleted' }).status, 'deleted'));
+test('SQL and NoSQL labels stay distinct', () => assert.deepEqual(technologyLabels({ ...project, languages: ['sql'], database_categories: ['nosql'] }), ['SQL', 'NoSQL']));

@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import Link from "next/link";
 
 function formatConversationDate(timestamp) {
     if (!timestamp) {
@@ -316,6 +317,18 @@ export default function ConversationSidebar({
                     </span>
                 </button>
             </div>
+
+
+            <Link
+                href="/projects"
+                onClick={onCloseMobile}
+                title="Projects"
+                aria-label="Open projects"
+                className={`mx-2 mt-3 flex items-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-200 focus-visible:outline-blue-500 dark:border-slate-700 dark:hover:bg-slate-800 ${collapsed ? "justify-center" : "gap-2"}`}
+            >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5 shrink-0"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></svg>
+                {!collapsed && <span>Projects</span>}
+            </Link>
 
             <nav
                 aria-label="Conversation history"

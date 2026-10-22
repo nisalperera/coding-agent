@@ -235,3 +235,5 @@ database/mysql/data/
 database/postgresql/.env
 database/postgresql/data/
 !postgresql/data/.gitkeep
+
+projects/
