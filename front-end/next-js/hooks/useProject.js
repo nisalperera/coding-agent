@@ -1,41 +1,56 @@
 'use client';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getProject } from '../lib/projects';
-export function useProject(projectId) {
-    const [version, setVersion] = useState(0);
-    const [state, setState] = useState({ id: null, project: null, loading: true, error: null });
-    const controller = useRef(null);
-    useEffect(() => {
-        if (
-            typeof projectId !== "string" ||
-            !projectId.trim() ||
-            projectId === "undefined" ||
-            projectId === "null"
-        ) {
-            setState({
-                id: projectId,
-                project: null,
-                loading: false,
-                error: new Error(
-                    "The project route did not provide a valid project ID."
-                ),
-            });
 
-            return;
-        }
-        const current = new AbortController(); controller.current = current;
-        setState({ id: projectId, project: null, loading: true, error: null });
-        getProject(projectId, current.signal).then(project => {
-            if (!current.signal.aborted) setState({ id: projectId, project, loading: false, error: null });
-        }).catch(error => {
-            if (!current.signal.aborted) setState({ id: projectId, project: null, loading: false, error });
-        });
-        return () => current.abort();
-    }, [projectId, version]);
-    const reload = useCallback(() => setVersion(value => value + 1), []);
-    const replace = useCallback(project => {
-        controller.current?.abort();
-        setState({ id: project.id, project, loading: false, error: null });
-    }, []);
-    return { ...(state.id === projectId ? state : { project: null, loading: true, error: null }), reload, replace };
+const INVALID_PROJECT_ID = new Error(
+  'The project route did not provide a valid project ID.'
+);
+
+export function useProject(projectId) {
+  const [version, setVersion] = useState(0);
+  const [result, setResult] = useState(null);
+  const requestRef = useRef(null);
+  const validId = typeof projectId === 'string' && Boolean(projectId.trim()) &&
+    projectId !== 'undefined' && projectId !== 'null';
+
+  useEffect(() => {
+    if (!validId) return;
+
+    const controller = new AbortController();
+    const request = { id: projectId, version, controller };
+    requestRef.current = request;
+
+    getProject(projectId, controller.signal).then(project => {
+      if (!controller.signal.aborted) {
+        setResult({ id: projectId, version, project, error: null });
+      }
+    }).catch(error => {
+      if (!controller.signal.aborted) {
+        setResult({ id: projectId, version, project: null, error });
+      }
+    });
+
+    return () => {
+      controller.abort();
+      if (requestRef.current === request) requestRef.current = null;
+    };
+  }, [projectId, validId, version]);
+
+  const reload = useCallback(() => setVersion(value => value + 1), []);
+  const replace = useCallback(project => {
+    if (project?.id !== projectId) return;
+    const request = requestRef.current;
+    if (request && (request.id !== projectId || request.version !== version)) return;
+    request?.controller.abort();
+    setResult({ id: projectId, version, project, error: null });
+  }, [projectId, version]);
+
+  if (!validId) {
+    return { project: null, loading: false, error: INVALID_PROJECT_ID, reload, replace };
+  }
+  if (result?.id !== projectId || result.version !== version) {
+    return { project: null, loading: true, error: null, reload, replace };
+  }
+  return { project: result.project, loading: false, error: result.error, reload, replace };
 }
