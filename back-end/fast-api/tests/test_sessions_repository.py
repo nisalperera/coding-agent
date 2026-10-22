@@ -61,7 +61,7 @@ def test_get_session_user_updates_last_seen_at(google_claims: dict[str, object],
     db.expire_all()
 
     future = original_last_seen + 5
-    monkeypatch.setattr("app.db.sessions_repository.time.time", lambda: future)
+    monkeypatch.setattr("app.db.core.sessions_repository.time.time", lambda: future)
 
     result = get_session_user(token)
     assert result is not None
