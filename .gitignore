@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -218,7 +218,6 @@ __marimo__/
 .streamlit/secrets.toml
 
 back-end/fast-api/data/*.db
-back-end/fast-api/alembic/
 back-end/fast-api/.backend/
 
 vllm-model/huggingface/
@@ -236,4 +235,4 @@ database/postgresql/.env
 database/postgresql/data/
 !postgresql/data/.gitkeep
 
-projects/
+/projects/
