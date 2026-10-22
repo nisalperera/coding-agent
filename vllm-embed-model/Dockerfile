@@ -1,0 +1,36 @@
+# Pin this in production to a vLLM version validated against your CUDA driver.
+FROM vllm/vllm-openai:v0.10.2
+
+ARG HF_HUB_DISABLE_XET=1
+ARG HF_HUB_DOWNLOAD_TIMEOUT=300
+ARG HF_HUB_ETAG_TIMEOUT=30
+ARG HF_HUB_ENABLE_HF_TRANSFER=0
+ARG MODEL_NAME=Qwen/Qwen3-Embedding-0.6B
+ARG MODEL_FILE=""
+
+ENV HF_HOME=/root/.cache/huggingface \
+    HF_HUB_DISABLE_XET=${HF_HUB_DISABLE_XET} \
+    HF_HUB_DOWNLOAD_TIMEOUT=${HF_HUB_DOWNLOAD_TIMEOUT} \
+    HF_HUB_ETAG_TIMEOUT=${HF_HUB_ETAG_TIMEOUT} \
+    HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER} \
+    TRANSFORMERS_CACHE=/root/.cache/huggingface \
+    TOKENIZERS_PARALLELISM=true \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 9001
+
+RUN python3 -m pip install "huggingface_hub[cli]"
+
+RUN pip uninstall -y pynvml && \
+    pip install "nvidia-ml-py==13.610.43"
+
+COPY start-vllm.sh /usr/local/bin/start-vllm.sh
+
+RUN chmod +x /usr/local/bin/start-vllm.sh
+
+RUN ls /usr/local/bin/*.sh
+
+ENV MODEL_NAME=${MODEL_NAME} \
+    MODEL_FILE=${MODEL_FILE}
+
+ENTRYPOINT ["/usr/local/bin/start-vllm.sh"]
