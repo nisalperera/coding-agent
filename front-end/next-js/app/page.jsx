@@ -175,6 +175,7 @@ export default function Page() {
 
     const [integrationsOpen, setIntegrationsOpen] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [sidebarStorageReady, setSidebarStorageReady] = useState(false);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [conversationPendingDelete, setConversationPendingDelete] =
         useState(null);
@@ -220,25 +221,41 @@ export default function Page() {
         }
     }, [chatDisabled]);
 
+    const isIntegrationsOpen =
+        hasVisibleIntegrations && integrationsOpen;
+
     useEffect(() => {
-        if (!hasVisibleIntegrations) {
-            setIntegrationsOpen(false);
+        let savedSidebarCollapsed = false;
+
+        try {
+            savedSidebarCollapsed =
+                window.localStorage.getItem(
+                    "conversation-sidebar-collapsed",
+                ) === "true";
+        } catch {
+            // Keep the default when browser storage is unavailable.
         }
-    }, [hasVisibleIntegrations]);
 
-    useEffect(() => {
-        const savedSidebarCollapsed =
-            window.localStorage.getItem("conversation-sidebar-collapsed") === "true";
-
+        /* eslint-disable react-hooks/set-state-in-effect -- Restore browser-only preferences after hydration. */
         setSidebarCollapsed(savedSidebarCollapsed);
+        setSidebarStorageReady(true);
+        /* eslint-enable react-hooks/set-state-in-effect */
     }, []);
 
     useEffect(() => {
-        window.localStorage.setItem(
-            "conversation-sidebar-collapsed",
-            String(sidebarCollapsed),
-        );
-    }, [sidebarCollapsed]);
+        if (!sidebarStorageReady) {
+            return;
+        }
+
+        try {
+            window.localStorage.setItem(
+                "conversation-sidebar-collapsed",
+                String(sidebarCollapsed),
+            );
+        } catch {
+            // The sidebar remains usable without persistent storage.
+        }
+    }, [sidebarCollapsed, sidebarStorageReady]);
 
     const handleToggleSidebar = useCallback(() => {
         setSidebarCollapsed((previous) => !previous);
@@ -395,7 +412,7 @@ export default function Page() {
                 )}
 
                 <IntegrationsModal
-                    open={integrationsOpen && hasVisibleIntegrations}
+                    open={isIntegrationsOpen && hasVisibleIntegrations}
                     onClose={() => setIntegrationsOpen(false)}
                     integrations={visibleIntegrations}
                     integrationVisibility={integrationVisibility}

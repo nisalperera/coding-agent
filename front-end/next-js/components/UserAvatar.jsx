@@ -1,7 +1,19 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+
+const SIZE_CLASSES = {
+    sm: "h-8 w-8 text-xs",
+    md: "h-10 w-10 text-sm",
+    lg: "h-20 w-20 text-2xl",
+};
+
+const IMAGE_SIZES = {
+    sm: "32px",
+    md: "40px",
+    lg: "80px",
+};
 
 function getInitials(name, email) {
     const source = name?.trim() || email?.trim() || "User";
@@ -14,31 +26,20 @@ function getInitials(name, email) {
         .toUpperCase();
 }
 
-export default function UserAvatar({
-    user,
-    size = "md",
-    className = "",
+function AvatarContent({
+    name,
+    email,
+    image,
+    size,
+    className,
 }) {
     const [imageFailed, setImageFailed] = useState(false);
-
-    const name = user?.name ?? "Signed in user";
-    const email = user?.email ?? "";
-    const image = user?.image ?? user?.picture ?? null;
     const initials = getInitials(name, email);
-
-    const sizeClasses = {
-        sm: "h-8 w-8 text-xs",
-        md: "h-10 w-10 text-sm",
-        lg: "h-20 w-20 text-2xl",
-    };
-
-    useEffect(() => {
-        setImageFailed(false);
-    }, [image]);
+    const resolvedSize = SIZE_CLASSES[size] ? size : "md";
 
     return (
         <span
-            className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-600 to-violet-600 font-bold tracking-wide text-white ${sizeClasses[size]} ${className}`}
+            className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-600 to-violet-600 font-bold tracking-wide text-white ${SIZE_CLASSES[resolvedSize]} ${className}`}
             aria-hidden="true"
         >
             {image && !imageFailed ? (
@@ -46,13 +47,7 @@ export default function UserAvatar({
                     src={image}
                     alt=""
                     fill
-                    sizes={
-                        size === "lg"
-                            ? "80px"
-                            : size === "md"
-                                ? "40px"
-                                : "32px"
-                    }
+                    sizes={IMAGE_SIZES[resolvedSize]}
                     className="object-cover"
                     onError={() => setImageFailed(true)}
                 />
@@ -60,5 +55,26 @@ export default function UserAvatar({
                 initials
             )}
         </span>
+    );
+}
+
+export default function UserAvatar({
+    user,
+    size = "md",
+    className = "",
+}) {
+    const name = user?.name ?? "Signed in user";
+    const email = user?.email ?? "";
+    const image = user?.image ?? user?.picture ?? null;
+
+    return (
+        <AvatarContent
+            key={image || "no-image"}
+            name={name}
+            email={email}
+            image={image}
+            size={size}
+            className={className}
+        />
     );
 }

@@ -70,7 +70,7 @@ def test_upsert_google_user_rejects_disallowed_domain(
     monkeypatch,
     google_claims: dict[str, object],
 ) -> None:
-    import app.db.users_repository as users_repository
+    import app.db.core.users_repository as users_repository
 
     monkeypatch.setattr(
         users_repository.settings,

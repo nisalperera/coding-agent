@@ -167,17 +167,19 @@ async def chat_completions(
             IndexError,
             TypeError,
             json.JSONDecodeError,
+            httpx.HTTPStatusError,
         ) as exc:
             log_event(
                 logging.ERROR,
-                "vllm_tool_planning_failed",
+                "vllm_message_failed",
                 error=str(exc.__class__.__name__),
                 trace_id=trace_id,
+                response_body=exc.response.json() if isinstance(exc, httpx.HTTPStatusError) else None,
             )
             yield json_line(
                 {
                     "type": "error",
-                    "message": "Model request failed. Please retry.",
+                    "message": exc.response.json()["error"]["message"] if isinstance(exc, httpx.HTTPStatusError) else None,
                 }
             )
             return

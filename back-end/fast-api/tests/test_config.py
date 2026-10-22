@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from collections.abc import Iterator
 
@@ -84,7 +85,7 @@ def _assert_config_error(
     message: str,
     **overrides: str | None,
 ) -> None:
-    with pytest.raises(RuntimeError, match=message):
+    with pytest.raises(RuntimeError, match=re.escape(message)):
         _load_settings(monkeypatch, **overrides)
 
 
@@ -99,10 +100,12 @@ def test_development_localhost_configuration_loads(monkeypatch: pytest.MonkeyPat
     ]
 
 
-def test_markdown_formatted_cors_origin_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_markdown_formatted_cors_origin_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _assert_config_error(
         monkeypatch,
-        "CORS_ALLOW_ORIGINS must be an absolute HTTP\\(S\\) URL",
+        "CORS_ALLOW_ORIGINS must be an absolute HTTP(S) URL",
         CORS_ALLOW_ORIGINS=(
             "http://localhost:3000,"
             "[http://127.0.0.1:3000](http://127.0.0.1:3000)"
@@ -157,7 +160,7 @@ def test_missing_database_url_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
 def test_rejects_sqlite_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     _assert_config_error(
         monkeypatch,
-        "DATABASE_URL must use the mysql\\+pymysql SQLAlchemy dialect",
+        "DATABASE_URL must use the mysql+pymysql or postgresql+psycopg SQLAlchemy dialect",
         DATABASE_URL="sqlite:///data/coding_agent.db",
     )
 
@@ -246,9 +249,11 @@ def test_gitlab_duplicate_scope_is_rejected(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
 
-def test_gitlab_unsupported_scope_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gitlab_unsupported_scope_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _assert_config_error(
         monkeypatch,
-        "GITLAB_OAUTH_SCOPES contains unsupported scope\\(s\\): sudo",
+        "GITLAB_OAUTH_SCOPES contains unsupported scope(s): sudo",
         GITLAB_OAUTH_SCOPES="read_user sudo",
     )

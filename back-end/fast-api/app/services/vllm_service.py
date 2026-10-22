@@ -105,6 +105,15 @@ async def is_vllm_ready(client: httpx.AsyncClient, trace_id: str) -> bool:
 
 async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], user_settings: UserSettings, tools: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
     payload: dict[str, Any] = {"model": user_settings.llm_model, "messages": messages, "stream": False}
+    
+    if len(payload["messages"]) <= 1:
+        log_event(
+            logging.INFO,
+            "vllm_request_first_message",
+            msg=f"Increased read timeout for first message to 60.0 seconds",
+        )
+        client.timeout.read = 60.0
+    
     log_event(
         logging.INFO,
         "vllm_request_initiated",
@@ -124,13 +133,7 @@ async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], u
             "request_timeout": client.timeout.__dict__,
         },
     )
-    if len(payload["messages"]) <= 1:
-        log_event(
-            logging.INFO,
-            "vllm_request_first_message",
-            msg=f"Increased read timeout for first message to 60.0 seconds",
-        )
-        client.timeout.read = 60.0
+
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
@@ -142,7 +145,7 @@ async def call_vllm(client: httpx.AsyncClient, messages: list[dict[str, Any]], u
             **{
                 "status_code": response.status_code,
                 "response_headers": dict(response.headers),
-                "response_body": response.text,
+                "response_body": response.json() or response.text,
                 "request_url": str(response.request.url),
                 "request_headers": {
                     key: value

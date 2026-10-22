@@ -163,9 +163,8 @@ function mapBackendSettingsToFormState(serverSettings) {
 function Toggle({ checked, label, description, onChange, disabled = false }) {
     return (
         <label
-            className={`flex items-start justify-between gap-5 rounded-lg px-4 py-3 ${
-                disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-            }`}
+            className={`flex items-start justify-between gap-5 rounded-lg px-4 py-3 ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                }`}
         >
             <span>
                 <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
@@ -196,11 +195,10 @@ function TabButton({ active, tabId, panelId, children, onClick }) {
             aria-controls={panelId}
             tabIndex={active ? 0 : -1}
             onClick={onClick}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-                active
-                    ? "bg-white text-blue-700 shadow-sm dark:bg-slate-800 dark:text-blue-300"
-                    : "text-slate-600 hover:text-slate-950 dark:text-slate-400 dark:hover:text-slate-100"
-            }`}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${active
+                ? "bg-white text-blue-700 shadow-sm dark:bg-slate-800 dark:text-blue-300"
+                : "text-slate-600 hover:text-slate-950 dark:text-slate-400 dark:hover:text-slate-100"
+                }`}
         >
             {children}
         </button>
@@ -248,8 +246,8 @@ function TextField({
                     type === "password"
                         ? "new-password"
                         : type === "url"
-                          ? "url"
-                          : "off"
+                            ? "url"
+                            : "off"
                 }
                 className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
             />
@@ -297,11 +295,7 @@ function MultiSelectField({
         };
     }, []);
 
-    useEffect(() => {
-        if (disabled) {
-            setOpen(false);
-        }
-    }, [disabled]);
+    const isOpen = !disabled && open;
 
     function toggleOption(optionValue) {
         if (disabled) {
@@ -345,7 +339,7 @@ function MultiSelectField({
                     type="button"
                     disabled={disabled}
                     aria-haspopup="listbox"
-                    aria-expanded={open}
+                    aria-expanded={isOpen}
                     aria-controls={`${id}-listbox`}
                     aria-labelledby={`${id}-label`}
                     aria-describedby={`${id}-description`}
@@ -365,17 +359,15 @@ function MultiSelectField({
                     >
                         {selectedOptions.length === 0
                             ? "Select OAuth scopes"
-                            : `${selectedOptions.length} scope${
-                                  selectedOptions.length === 1 ? "" : "s"
-                              } selected`}
+                            : `${selectedOptions.length} scope${selectedOptions.length === 1 ? "" : "s"
+                            } selected`}
                     </span>
                     <svg
                         aria-hidden="true"
                         viewBox="0 0 20 20"
                         fill="currentColor"
-                        className={`h-4 w-4 shrink-0 text-slate-500 transition-transform dark:text-slate-400 ${
-                            open ? "rotate-180" : ""
-                        }`}
+                        className={`h-4 w-4 shrink-0 text-slate-500 transition-transform dark:text-slate-400 ${isOpen ? "rotate-180" : ""
+                            }`}
                     >
                         <path
                             fillRule="evenodd"
@@ -384,7 +376,7 @@ function MultiSelectField({
                         />
                     </svg>
                 </button>
-                {open && !disabled && (
+                {isOpen && !disabled && (
                     <div
                         id={`${id}-listbox`}
                         role="listbox"
@@ -400,11 +392,10 @@ function MultiSelectField({
                                     key={option.value}
                                     role="option"
                                     aria-selected={selected}
-                                    className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
-                                        selected
-                                            ? "bg-blue-50 text-blue-950 dark:bg-blue-950/40 dark:text-blue-100"
-                                            : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                                    }`}
+                                    className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${selected
+                                        ? "bg-blue-50 text-blue-950 dark:bg-blue-950/40 dark:text-blue-100"
+                                        : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                                        }`}
                                 >
                                     <input
                                         type="checkbox"
@@ -437,9 +428,8 @@ function MultiSelectField({
                             {selectedOptions.map((option) => (
                                 <div
                                     key={option.value}
-                                    className={`flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 dark:border-blue-900/70 dark:bg-blue-950/30 ${
-                                        disabled ? "opacity-50" : ""
-                                    }`}
+                                    className={`flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 dark:border-blue-900/70 dark:bg-blue-950/30 ${disabled ? "opacity-50" : ""
+                                        }`}
                                 >
                                     <div className="min-w-0">
                                         <p className="truncate text-sm font-medium text-blue-950 dark:text-blue-100">
@@ -556,22 +546,34 @@ export default function SettingsPage() {
         integrationFormDisabled || !integrationSettings.llm.enabled;
 
     useEffect(() => {
+        let restoredSettings = DEFAULT_SETTINGS;
+
         try {
-            const storedSettings = window.localStorage.getItem(
-                SETTINGS_STORAGE_KEY,
-            );
+            const storedSettings =
+                window.localStorage.getItem(SETTINGS_STORAGE_KEY);
 
             if (storedSettings) {
-                setSettings({
-                    ...DEFAULT_SETTINGS,
-                    ...JSON.parse(storedSettings),
-                });
+                const parsedSettings = JSON.parse(storedSettings);
+
+                if (
+                    parsedSettings !== null &&
+                    typeof parsedSettings === "object" &&
+                    !Array.isArray(parsedSettings)
+                ) {
+                    restoredSettings = {
+                        ...DEFAULT_SETTINGS,
+                        ...parsedSettings,
+                    };
+                }
             }
         } catch {
-            setSettings(DEFAULT_SETTINGS);
-        } finally {
-            setReady(true);
+            // Use defaults for unreadable or malformed storage.
         }
+
+        /* eslint-disable react-hooks/set-state-in-effect -- Restore browser-only settings after hydration. */
+        setSettings(restoredSettings);
+        setReady(true);
+        /* eslint-enable react-hooks/set-state-in-effect */
     }, []);
 
     useEffect(() => {
@@ -584,16 +586,18 @@ export default function SettingsPage() {
                 SETTINGS_STORAGE_KEY,
                 JSON.stringify(settings),
             );
-            setSaved(true);
-
-            const timeoutId = window.setTimeout(() => {
-                setSaved(false);
-            }, 1800);
-
-            return () => window.clearTimeout(timeoutId);
         } catch {
             return undefined;
         }
+
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Preserve existing autosave confirmation after a successful storage write.
+        setSaved(true);
+
+        const timeoutId = window.setTimeout(() => {
+            setSaved(false);
+        }, 1800);
+
+        return () => window.clearTimeout(timeoutId);
     }, [settings, ready]);
 
     useEffect(() => {
@@ -748,6 +752,8 @@ export default function SettingsPage() {
 
             const savedSettings = response?.settings ?? response;
 
+            console.log(savedSettings);
+
             if (!savedSettings || typeof savedSettings !== "object") {
                 throw new Error(
                     "The server did not return the updated integration settings.",
@@ -779,8 +785,10 @@ export default function SettingsPage() {
         }
     }
 
+    console.log("Settings:", integrationSettings);
+
     return (
-        <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:py-10">
+        <main className="scrollbar-hidden mx-auto min-h-0 w-full max-w-6xl flex-1 overflow-y-auto px-4 py-8 sm:py-10">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <div>
                     <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
@@ -983,7 +991,7 @@ export default function SettingsPage() {
                         </section>
                     )}
 
-                    <div className="grid gap-6 lg:grid-cols-2">
+                    <div className="space-y-6">
                         <IntegrationCard
                             title="GitHub"
                             description="Configure GitHub OAuth and repository access permissions."
