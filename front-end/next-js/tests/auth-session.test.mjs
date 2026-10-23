@@ -60,8 +60,10 @@ test("account replacement without settings clears old flags",async()=>{
 });
 test("logout invalidates a pending login",async()=>{
   const d=deferred(); const {session}=setup((path)=>path.endsWith('/login')?d.promise:Promise.resolve({}));
-  const p=session.login({email:'a',password:'x'}); await session.logout(); d.resolve(response());
-  assert.equal(await p,null); assert.equal(session.getSnapshot().status,'anonymous');
+  const p=session.login({email:'a',password:'x'}); const logout=session.logout();
+  assert.equal(session.getSnapshot().user,null);
+  d.resolve(response()); assert.equal(await p,null); await logout;
+  assert.equal(session.getSnapshot().status,'anonymous');
 });
 test("subscribers share state and unsubscribe",async()=>{
   const {session}=setup(async()=>response());let n=0;const stop=session.subscribe(()=>n++);
