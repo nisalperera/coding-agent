@@ -25,6 +25,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from jwt import PyJWKClient
 
 from app.core.config import settings
+from app.auth.session_cookie import set_session_cookie
 from app.db.auth.oauth_state_repository import consume_oauth_state, save_oauth_state
 from app.db.core.sessions_repository import create_session
 from app.db.core.users_repository import upsert_google_user_claims
@@ -73,7 +74,7 @@ async def build_login_redirect(request: Request) -> RedirectResponse:
         max_age=settings.OAUTH_STATE_TTL_S,
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite=None,
+        samesite="lax",
         path="/v1/auth/google",
     )
     return response
@@ -144,14 +145,9 @@ async def handle_callback(code: str, state: str, request: Request) -> RedirectRe
     response.delete_cookie(
         key=settings.OAUTH_STATE_COOKIE_NAME,
         path="/v1/auth/google",
-    )
-    response.set_cookie(
-        key=settings.SESSION_COOKIE_NAME,
-        value=session_token,
-        max_age=settings.SESSION_TTL_S,
-        httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite="none",
-        path="/",
+        httponly=True,
+        samesite="lax",
     )
+    set_session_cookie(response, session_token)
     return response

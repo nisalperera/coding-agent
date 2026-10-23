@@ -17,6 +17,7 @@ from app.schemas.common import (
 )
 from app.auth.dependencies import current_user, current_user_settings
 from app.core.config import settings
+from app.auth.session_cookie import clear_session_cookie
 from app.db.models.common import UserSettings
 from app.services.google_oauth_service import build_login_redirect, handle_callback
 from app.services.login_service import (
@@ -56,7 +57,7 @@ async def logout(request: Request, authorization: Optional[str] = Header(default
         await delete_session_to_logout(token)
 
     response = JSONResponse({"logged_out": True})
-    response.delete_cookie(settings.SESSION_COOKIE_NAME, path="/")
+    clear_session_cookie(response)
     return response
 
 

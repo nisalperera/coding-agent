@@ -5,6 +5,7 @@ from pwdlib import PasswordHash
 from fastapi.responses import Response
 
 from app.core.config import settings
+from app.auth.session_cookie import set_session_cookie
 
 
 password_hasher = PasswordHash.recommended()
@@ -31,12 +32,4 @@ def decode_access_token(token: str) -> dict:
     return payload
 
 def set_auth_cookie(response: Response, token: str) -> None:
-    response.set_cookie(
-        key=settings.SESSION_COOKIE_NAME,
-        value=token,
-        max_age=settings.JWT_EXPIRES_MINUTES * 60,
-        path="/",
-        secure=settings.COOKIE_SECURE,
-        httponly=True,
-        samesite="lax",
-    )
+    set_session_cookie(response, token)

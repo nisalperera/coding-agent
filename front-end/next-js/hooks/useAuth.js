@@ -1,100 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import {
-  completeLoginFromUrlFragment,
-  getCachedUser,
-  isSignedIn,
-  loginWithGoogle,
-  loginWithPassword as loginWithPasswordRequest,
-  logout as logoutRequest,
-  refreshCurrentUser,
-  registerWithPassword as registerWithPasswordRequest,
-} from "../lib/auth";
+import { useEffect, useSyncExternalStore } from "react";
+import { authSession, loginWithGoogle } from "../lib/auth";
+import { INITIAL_AUTH } from "../lib/auth-session.mjs";
 
 export function useAuth() {
-  const [signedIn, setSignedIn] = useState(false);
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
-
-  const refresh = useCallback(async () => {
-    // Render the cached account immediately, then verify it using the
-    // HttpOnly-cookie-backed /v1/auth/me endpoint.
-    setSignedIn(isSignedIn());
-    setUser(getCachedUser());
-
-    const currentUser = await refreshCurrentUser();
-
-    setUser(currentUser);
-    setSignedIn(Boolean(currentUser));
-    setAuthLoading(false);
-
-    return currentUser;
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    async function initializeAuth() {
-      await completeLoginFromUrlFragment();
-
-      if (!active) {
-        return;
-      }
-
-      await refresh();
-    }
-
-    initializeAuth();
-
-    return () => {
-      active = false;
-    };
-  }, [refresh]);
-
-  const loginWithPassword = useCallback(async ({ email, password }) => {
-    const authenticatedUser = await loginWithPasswordRequest({
-      email,
-      password,
-    });
-
-    setUser(authenticatedUser);
-    setSignedIn(true);
-
-    return authenticatedUser;
-  }, []);
-
-  const registerWithPassword = useCallback(
-    async ({ name, email, password }) => {
-      const authenticatedUser = await registerWithPasswordRequest({
-        name,
-        email,
-        password,
-      });
-
-      setUser(authenticatedUser);
-      setSignedIn(true);
-
-      return authenticatedUser;
-    },
-    [],
-  );
-
-  const logout = useCallback(async () => {
-    await logoutRequest();
-
-    setUser(null);
-    setSignedIn(false);
-  }, []);
-
+  const state = useSyncExternalStore(authSession.subscribe, authSession.getSnapshot, () => INITIAL_AUTH);
+  useEffect(() => { void authSession.initialize(); }, []);
   return {
-    signedIn,
-    user,
-    authLoading,
+    ...state,
+    signedIn: state.status === "authenticated",
+    authLoading: state.status === "loading",
+    authError: state.error,
     loginWithGoogle,
-    loginWithPassword,
-    registerWithPassword,
-    logout,
-    refresh,
+    loginWithPassword: authSession.login,
+    registerWithPassword: authSession.register,
+    logout: authSession.logout,
+    refresh: authSession.refresh,
   };
 }

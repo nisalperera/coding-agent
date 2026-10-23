@@ -5,11 +5,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import actions, auth, chat, health, integration, projects, settings as app_settings, conversations
 from app.auth.operator_access import operator_user_ids
+from app.auth.session_cookie import session_cookie_options
 from app.core.config import settings
 from app.db.database import assert_database_ready, dispose_database_engine, dispose_mongodb_client, initialize_mongodb
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    session_cookie_options()  # Fail closed before database startup on invalid cookie policy.
     operator_user_ids()
     assert_database_ready()
     await initialize_mongodb()
