@@ -147,3 +147,32 @@ deploy-frontend:
     - sed -i "s|__GITLAB_OAUTH_CLIENT_ID__|$GITLAB_OAUTH_CLIENT_ID|g" front-end/config.js
     - aws s3 sync front-end/ s3://$BUCKET_NAME/ --delete
     - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*"
+
+
+frontend-acceptance:
+  stage: test
+  image: node:22.22.2-bookworm-slim
+  timeout: 45m
+  services:
+    - name: docker:28-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: /certs
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: /certs/client
+  rules:
+    - changes:
+        - front-end/next-js/**
+        - .github/workflows/frontend-acceptance.yml
+        - .gitlab-ci.yml
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends docker.io ca-certificates
+  script:
+    - node front-end/next-js/scripts/run-frontend-acceptance.mjs --container --output output/frontend-acceptance
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - output/frontend-acceptance/

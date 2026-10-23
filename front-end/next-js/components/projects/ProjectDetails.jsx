@@ -8,7 +8,10 @@ import { PROJECT_TYPES, technologyLabels } from '../../lib/project-domain.mjs';
 import { ProjectError } from './ProjectShell';
 import ProjectDialog from './ProjectDialog';
 import ProjectForm from './ProjectForm';
+import { useIdentityLease } from '../VerifiedIdentityBoundary';
 export default function ProjectDetails({ projectId, settings = false }) {
+  const scope = useIdentityLease();
+  const mutationRef = useRef(false);
   const { project, loading, error, reload, replace } = useProject(projectId);
   const router = useRouter();
   const [busy, setBusy] = useState(false); const [mutationError, setMutationError] = useState('');
@@ -17,22 +20,25 @@ export default function ProjectDetails({ projectId, settings = false }) {
   const [deleteError, setDeleteError] = useState(''); const [confirmation, setConfirmation] = useState('');
   const dirty = useRef(false);
   async function save(payload) {
-    if (busy || conflict) return;
+    if (!scope.isCurrent() || mutationRef.current || conflict || !project) return;
+    const operation = scope.begin(); mutationRef.current = true;
     setBusy(true); setMutationError(''); setNotice('');
-    try { replace(await updateProject(project.id, project.revision, payload)); dirty.current = false; setNotice('Project settings saved.'); }
-    catch (error) { setConflict([409, 412].includes(error.status)); setMutationError(error.message); }
-    finally { setBusy(false); }
+    try { const saved = await updateProject(project.id, project.revision, payload, operation.signal); if (!operation.isCurrent()) return; replace(saved); dirty.current = false; setNotice('Project settings saved.'); }
+    catch (error) { if (!operation.isCurrent()) return; setConflict([409, 412].includes(error.status)); setMutationError(error.message); }
+    finally { if (operation.isCurrent()) { mutationRef.current = false; setBusy(false); } operation.close(); }
   }
   function refreshAfterConflict() {
+    if (!scope.isCurrent()) return;
     if (!window.confirm('Discard this draft and reload the latest server settings?')) return;
     dirty.current = false; setConflict(false); setMutationError(''); setNotice(''); reload();
   }
   async function remove() {
-    if (deleteBusy || confirmation !== project.name) return;
+    if (!scope.isCurrent() || mutationRef.current || !project || confirmation !== project.name) return;
+    const operation = scope.begin(); mutationRef.current = true;
     setDeleteBusy(true); setDeleteError('');
-    try { await softDeleteProject(project.id, project.revision); dirty.current = false; setDeleting(false); router.replace('/projects?notice=soft-deleted'); }
-    catch (error) { setDeleteError(`${error.message} Refresh the project before retrying if the result is uncertain.`); }
-    finally { setDeleteBusy(false); }
+    try { await softDeleteProject(project.id, project.revision, operation.signal); if (!operation.isCurrent()) return; dirty.current = false; setDeleting(false); router.replace('/projects?notice=soft-deleted'); }
+    catch (error) { if (!operation.isCurrent()) return; setDeleteError(`${error.message} Refresh the project before retrying if the result is uncertain.`); }
+    finally { if (operation.isCurrent()) { mutationRef.current = false; setDeleteBusy(false); } operation.close(); }
   }
   if (loading) return <p role="status">Loading project...</p>;
   if (error) return <ProjectError error={error} onRetry={reload} />;

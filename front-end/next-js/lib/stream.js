@@ -1,211 +1,77 @@
-// front-end/local/lib/stream.js
-//
-// Parses the mixed agent response stream:
-//
-// 1. NDJSON control records:
-//    {"type":"progress","message":"...","percent":40}
-//    {"type":"answer_start"}
-//    {"type":"confirmation_required", ...}
-//    {"type":"error","message":"..."}
-//
-// 2. OpenAI-compatible SSE token frames:
-//    data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n
-//    data: [DONE]\n\n
-
-function getTokenFromSsePayload(payload) {
-    const choices = payload?.choices;
-
-    if (!Array.isArray(choices) || choices.length === 0) {
-        return "";
-    }
-
-    const delta = choices[0]?.delta;
-
-    if (!delta || typeof delta !== "object") {
-        return "";
-    }
-
-    const content = delta.content;
-
-    if (typeof content === "string") {
-        return content;
-    }
-
-    if (Array.isArray(content)) {
-        return content
-            .map((part) => {
-                if (typeof part === "string") {
-                    return part;
-                }
-
-                if (part && typeof part.text === "string") {
-                    return part.text;
-                }
-
-                return "";
-            })
-            .join("");
-    }
-
-    return "";
-}
-
-function parseControlEvent(rawLine, handlers) {
-    let event;
-
-    try {
-        event = JSON.parse(rawLine);
-    } catch {
-        return false;
-    }
-
-    if (!event || typeof event !== "object" || !event.type) {
-        return false;
-    }
-
-    switch (event.type) {
-        case "progress":
-            handlers.onProgress?.(event);
-            return true;
-
-        case "error":
-            handlers.onError?.(event);
-            return true;
-
-        case "confirmation_required":
-            handlers.onConfirmation?.(event);
-            return true;
-
-        case "answer_start":
-            handlers.onAnswerStart?.(event);
-            return true;
-
-        case "fallback":
-            handlers.onFallback?.(event);
-            return true;
-
-        case "done":
-            handlers.onDone?.(event);
-            return true;
-
-        default:
-            return false;
-    }
-}
-
-function parseSseFrame(frame, handlers) {
-    const dataLines = frame
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trimStart());
-
-    if (dataLines.length === 0) {
-        return false;
-    }
-
-    const data = dataLines.join("\n").trim();
-
-    if (!data) {
-        return false;
-    }
-
-    if (data === "[DONE]") {
-        handlers.onDone?.();
-        return true;
-    }
-
-    let payload;
-
-    try {
-        payload = JSON.parse(data);
-    } catch {
-        return false;
-    }
-
-    const token = getTokenFromSsePayload(payload);
-
-    if (token) {
-        handlers.onToken?.(token, payload);
-    }
-
-    const finishReason = payload?.choices?.[0]?.finish_reason;
-
-    if (finishReason) {
-        handlers.onDone?.(payload);
-    }
-
-    return true;
-}
-
+// Mixed NDJSON controls and OpenAI SSE, one terminal outcome per response.
 export async function consumeAgentStream(response, handlers = {}) {
-    if (!response?.body) {
-        throw new Error("The server returned an empty response stream.");
+  if (!response?.body) throw new Error("The server returned an empty response stream.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", data = [], terminal = false, eof = false;
+  const emit = (name, value) => { if (!terminal) handlers[name]?.(value); };
+  const end = (name, value) => {
+    if (terminal) return;
+    terminal = true;
+    handlers[name]?.(value);
+  };
+  function control(event) {
+    if (!event || typeof event !== "object") return;
+    switch (event.type) {
+      case "progress": emit("onProgress", event); break;
+      case "answer_start": emit("onAnswerStart", event); break;
+      case "error": end("onError", event); break;
+      case "confirmation_required": end("onConfirmation", event); break;
+      case "fallback": end("onFallback", event); break;
+      case "done": end("onDone", event); break;
+      default: break;
     }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-
-    let buffer = "";
-    let streamFinished = false;
-
-    try {
-        while (!streamFinished) {
-            const { done, value } = await reader.read();
-
-            if (done) {
-                break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-
-            while (buffer.length > 0) {
-                const firstNewlineIndex = buffer.indexOf("\n");
-                const firstSseBoundaryIndex = buffer.indexOf("\n\n");
-
-                if (buffer.startsWith("data:")) {
-                    if (firstSseBoundaryIndex === -1) {
-                        break;
-                    }
-
-                    const frame = buffer.slice(0, firstSseBoundaryIndex);
-                    buffer = buffer.slice(firstSseBoundaryIndex + 2);
-
-                    const handled = parseSseFrame(frame, handlers);
-
-                    if (handled && frame.includes("data: [DONE]")) {
-                        streamFinished = true;
-                    }
-
-                    continue;
-                }
-
-                if (firstNewlineIndex === -1) {
-                    break;
-                }
-
-                const line = buffer.slice(0, firstNewlineIndex).trim();
-                buffer = buffer.slice(firstNewlineIndex + 1);
-
-                if (!line) {
-                    continue;
-                }
-
-                parseControlEvent(line, handlers);
-            }
-        }
-
-        const trailingText = decoder.decode();
-
-        if (trailingText) {
-            buffer += trailingText;
-        }
-
-        if (buffer.startsWith("data:")) {
-            parseSseFrame(buffer.trim(), handlers);
-        } else if (buffer.trim()) {
-            parseControlEvent(buffer.trim(), handlers);
-        }
-    } finally {
-        reader.releaseLock();
+  }
+  function json(text) {
+    try { return JSON.parse(text); }
+    catch { throw new Error("Malformed agent stream record."); }
+  }
+  function flush() {
+    if (!data.length || terminal) { data = []; return; }
+    const text = data.join("\n").trim(); data = [];
+    if (!text) return;
+    if (text === "[DONE]") { end("onDone"); return; }
+    const payload = json(text);
+    if (payload.error || payload.type === "error") {
+      const error = payload.error ?? payload;
+      end("onError", { message: typeof error === "string" ? error : error.message ?? "Agent stream failed.",
+        status: error.status ?? error.status_code ?? payload.status }); return;
     }
+    if (payload.type) { control(payload); return; }
+    const choice = payload.choices?.[0];
+    const content = choice?.delta?.content;
+    const token = typeof content === "string" ? content : Array.isArray(content)
+      ? content.map(part => typeof part === "string" ? part : part?.text ?? "").join("") : "";
+    if (token) emit("onToken", token);
+    if (choice?.finish_reason) end("onDone", payload);
+  }
+  function line(raw) {
+    if (terminal) return;
+    const value = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    if (value === "") { flush(); return; }
+    if (value.startsWith("data:")) { data.push(value.slice(5).trimStart()); return; }
+    if (value.startsWith(":") || /^(event|id|retry):/.test(value)) return;
+    if (data.length) flush();
+    if (!terminal && value.trim()) control(json(value.trim()));
+  }
+  try {
+    while (!terminal) {
+      const chunk = await reader.read();
+      if (chunk.done) { eof = true; break; }
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let next;
+      while (!terminal && (next = buffer.indexOf("\n")) !== -1) {
+        const raw = buffer.slice(0, next); buffer = buffer.slice(next + 1); line(raw);
+      }
+    }
+    if (!terminal) {
+      buffer += decoder.decode();
+      if (buffer) line(buffer);
+      flush();
+    }
+  } finally {
+    // Detach browser reads, not server execution. Never wait indefinitely for cancel.
+    if (!eof) { try { void reader.cancel().catch(() => {}); } catch { /* Already closed. */ } }
+    reader.releaseLock();
+  }
 }

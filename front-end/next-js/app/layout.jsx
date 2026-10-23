@@ -1,4 +1,5 @@
 import './globals.css';
+import AuthSessionNotice from '../components/AuthSessionNotice';
 import 'highlight.js/styles/github-dark.css';
 import { ThemeProvider } from '../components/ThemeProvider';
 
@@ -20,6 +21,7 @@ export default function RootLayout({ children }) {
         <html lang="en">
             <body className="h-screen overflow-hidden flex flex-col bg-slate-100 text-slate-800 transition-colors dark:bg-slate-950 dark:text-slate-100">
                 <ThemeProvider>
+                    <AuthSessionNotice />
                     {children}
                 </ThemeProvider>
             </body>

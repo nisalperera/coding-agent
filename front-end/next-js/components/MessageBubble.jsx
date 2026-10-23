@@ -39,7 +39,7 @@ function RetryButton({ loading, onRetry }) {
             </button>
 
             <span className="text-xs text-rose-700/80 dark:text-rose-300/80">
-                The request did not complete.
+                Retry resends this turn. The previous server request may still have completed.
             </span>
         </div>
     );
@@ -129,7 +129,8 @@ function ProgressBubble({ text, percent }) {
     );
 }
 
-function ConfirmationCard({ toolName, args, resolved, onResolve }) {
+function ConfirmationCard({ toolName, args, resolved, resolutionStatus, resolutionError, busy, onResolve }) {
+    const blocked = busy || resolved || resolutionStatus === "pending" || resolutionStatus === "uncertain";
     return (
         <div className="flex items-start gap-3 justify-start">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-700 dark:bg-amber-900 dark:text-amber-200">
@@ -143,10 +144,17 @@ function ConfirmationCard({ toolName, args, resolved, onResolve }) {
                     {JSON.stringify(args, null, 2)}
                 </pre>
 
+                <p role="status" className="mb-2 text-xs">
+                    {resolutionStatus === "pending" ? "Submitting decision. Server outcome is not yet confirmed."
+                        : resolutionStatus === "confirmed" ? "The server confirmed the decision outcome."
+                        : resolutionStatus === "uncertain" ? "Outcome unknown. Do not resubmit until reconciled."
+                        : resolutionStatus === "failed" ? "The server rejected the submission." : ""}
+                </p>
+                {resolutionError && <p role="alert" className="mb-2 text-xs text-rose-700 dark:text-rose-300">{resolutionError}</p>}
                 <div className="flex gap-2">
                     <button
                         type="button"
-                        disabled={resolved}
+                        disabled={blocked}
                         onClick={() => onResolve("approve")}
                         className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs text-white transition hover:bg-emerald-700 disabled:opacity-50"
                     >
@@ -155,7 +163,7 @@ function ConfirmationCard({ toolName, args, resolved, onResolve }) {
 
                     <button
                         type="button"
-                        disabled={resolved}
+                        disabled={blocked}
                         onClick={() => onResolve("deny")}
                         className="rounded-full bg-slate-200 px-3 py-1.5 text-xs transition hover:bg-slate-300 disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600"
                     >
@@ -197,6 +205,9 @@ export default function MessageBubble({
                         toolName={message.toolName}
                         args={message.args}
                         resolved={message.resolved}
+                        resolutionStatus={message.resolutionStatus}
+                        resolutionError={message.resolutionError}
+                        busy={loading}
                         onResolve={(decision) =>
                             onResolveConfirmation(message.id, message.actionId, decision)
                         }

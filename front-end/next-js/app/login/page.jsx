@@ -2,12 +2,21 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { authSession } from "../../lib/auth";
+import { createAuthCompletionGuard } from "../../lib/auth-completion.mjs";
 import { useAuth } from "../../hooks/useAuth";
 import { useTheme } from '../../components/ThemeProvider';
 
 export default function LoginPage() {
     const router = useRouter();
+    const completionRef = useRef(null);
+    if (completionRef.current === null) completionRef.current = createAuthCompletionGuard();
+    useEffect(() => {
+        const guard = completionRef.current;
+        guard.activate();
+        return () => guard.deactivate();
+    }, []);
     const { loginWithGoogle, loginWithPassword } = useAuth();
 
     const [email, setEmail] = useState("");
@@ -18,20 +27,24 @@ export default function LoginPage() {
 
     async function handleSubmit(event) {
         event.preventDefault();
+        const guard = completionRef.current;
+        const ticket = guard.begin();
         setError("");
         setSubmitting(true);
 
         try {
-            await loginWithPassword({
+            const user = await loginWithPassword({
                 email,
                 password,
             });
 
+            if (!guard.canComplete(ticket, user, authSession.getSnapshot())) return;
             router.replace("/");
         } catch (loginError) {
+            if (!guard.isCurrent(ticket)) return;
             setError(loginError.message || "Unable to sign in");
         } finally {
-            setSubmitting(false);
+            if (guard.isCurrent(ticket)) setSubmitting(false);
         }
     }
 

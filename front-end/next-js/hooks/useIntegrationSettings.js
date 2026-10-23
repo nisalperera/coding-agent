@@ -29,13 +29,15 @@ export function clearIntegrationSettings() {
 const subscribe = (callback) => { listeners.add(callback); return () => listeners.delete(callback); };
 const getSnapshot = () => snapshot;
 const getServerSnapshot = () => DEFAULT;
-export function useIntegrationSettings() {
+const allowUpdate = () => true;
+export function useIntegrationSettings(isCurrent = allowUpdate) {
   const integrationSettings = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const setProviderEnabled = useCallback((provider, enabled) => {
+    if (!isCurrent()) return;
     if (!providers.has(provider)) throw new Error(`Unsupported integration provider: ${String(provider)}`);
     if (snapshot[provider].enabled === Boolean(enabled)) return;
     publish({ ...snapshot, [provider]: { enabled: Boolean(enabled) } });
-  }, []);
+  }, [isCurrent]);
   const setGitHubIntegrationEnabled = useCallback((enabled) => setProviderEnabled("github", enabled), [setProviderEnabled]);
   const setGitLabIntegrationEnabled = useCallback((enabled) => setProviderEnabled("gitlab", enabled), [setProviderEnabled]);
   const setLlmIntegrationEnabled = useCallback((enabled) => setProviderEnabled("llm", enabled), [setProviderEnabled]);

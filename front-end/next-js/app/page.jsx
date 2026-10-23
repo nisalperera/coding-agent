@@ -169,9 +169,7 @@ export default function Page() {
         deleteConversation,
         resolveConfirmation,
         retryFailedMessage,
-    } = useChat({
-        signedIn: auth.signedIn,
-    });
+    } = useChat();
 
     const [integrationsOpen, setIntegrationsOpen] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -261,8 +259,8 @@ export default function Page() {
         setSidebarCollapsed((previous) => !previous);
     }, []);
 
-    const handleNewConversation = useCallback(() => {
-        const conversationId = startNewConversation();
+    const handleNewConversation = useCallback(async () => {
+        const conversationId = await startNewConversation();
 
         if (conversationId) {
             setMobileSidebarOpen(false);

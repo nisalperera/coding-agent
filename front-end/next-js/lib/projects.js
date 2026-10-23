@@ -45,19 +45,19 @@ export async function getProject(id, signal) {
   if (project.status !== 'active') throw new ProjectApiError('This project is no longer available.', 410);
   return project;
 }
-export async function createProject(body) {
-  const project = parseProject(await request('/v1/projects', { method: 'POST', body }));
+export async function createProject(body, signal) {
+  const project = parseProject(await request('/v1/projects', { method: 'POST', body, signal }));
   if (project.status !== 'active') throw new Error('The created project is not active.');
   return project;
 }
-export async function updateProject(id, revision, body) {
-  const project = parseProject(await request(itemPath(id), { method: 'PATCH', revision, body }));
+export async function updateProject(id, revision, body, signal) {
+  const project = parseProject(await request(itemPath(id), { method: 'PATCH', revision, body, signal }));
   if (project.id !== id) throw new Error('The project API returned a different project identifier.');
   if (project.status !== 'active') throw new ProjectApiError('This project is no longer available.', 410);
   return project;
 }
-export async function softDeleteProject(id, revision) {
-  const payload = await request(itemPath(id), { method: 'DELETE', revision });
+export async function softDeleteProject(id, revision, signal) {
+  const payload = await request(itemPath(id), { method: 'DELETE', revision, signal });
   if (payload?.id !== id || payload?.status !== 'deleted') throw new Error('The server did not confirm soft deletion. Refresh before retrying.');
   return payload;
 }

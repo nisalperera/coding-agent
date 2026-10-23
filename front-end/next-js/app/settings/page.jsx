@@ -6,8 +6,9 @@ import { apiFetch } from "../../lib/api";
 import { useAuth } from "../../hooks/useAuth";
 import { useTheme } from "../../components/ThemeProvider";
 import { useIntegrationSettings } from "../../hooks/useIntegrationSettings";
+import VerifiedIdentityBoundary, { useIdentityLease } from "../../components/VerifiedIdentityBoundary";
+import { preferenceStorageKey, readPreferences } from "../../lib/identity-lease.mjs";
 
-const SETTINGS_STORAGE_KEY = "coding-agent-settings";
 
 const DEFAULT_SETTINGS = Object.freeze({
     sendWithEnter: true,
@@ -506,6 +507,15 @@ function DisabledProviderNotice({ children }) {
 }
 
 export default function SettingsPage() {
+    return <VerifiedIdentityBoundary allowGuest><AccountSettings /></VerifiedIdentityBoundary>;
+}
+
+function AccountSettings() {
+    const scope = useIdentityLease();
+    const settingsStorageKey = preferenceStorageKey(scope.identityKey);
+    const savingRef = useRef(false);
+    const saveNoticeTimer = useRef(null);
+    useEffect(() => () => window.clearTimeout(saveNoticeTimer.current), []);
     const { signedIn, loginWithGoogle } = useAuth();
     const { dark, toggleTheme } = useTheme();
     const {
@@ -513,7 +523,8 @@ export default function SettingsPage() {
         gitlabIntegrationEnabled,
         setGitHubIntegrationEnabled,
         setGitLabIntegrationEnabled,
-    } = useIntegrationSettings();
+        setLlmIntegrationEnabled,
+    } = useIntegrationSettings(scope.isCurrent);
 
     const [settings, setSettings] = useState(DEFAULT_SETTINGS);
     const [integrationSettings, setIntegrationSettings] = useState(
@@ -546,44 +557,26 @@ export default function SettingsPage() {
         integrationFormDisabled || !integrationSettings.llm.enabled;
 
     useEffect(() => {
-        let restoredSettings = DEFAULT_SETTINGS;
-
+        if (!scope.isCurrent()) return;
+        let restoredSettings = { ...DEFAULT_SETTINGS };
         try {
-            const storedSettings =
-                window.localStorage.getItem(SETTINGS_STORAGE_KEY);
-
-            if (storedSettings) {
-                const parsedSettings = JSON.parse(storedSettings);
-
-                if (
-                    parsedSettings !== null &&
-                    typeof parsedSettings === "object" &&
-                    !Array.isArray(parsedSettings)
-                ) {
-                    restoredSettings = {
-                        ...DEFAULT_SETTINGS,
-                        ...parsedSettings,
-                    };
-                }
-            }
-        } catch {
-            // Use defaults for unreadable or malformed storage.
-        }
+            restoredSettings = readPreferences(window.localStorage, settingsStorageKey, DEFAULT_SETTINGS);
+        } catch { /* Browser storage is optional. */ }
 
         /* eslint-disable react-hooks/set-state-in-effect -- Restore browser-only settings after hydration. */
         setSettings(restoredSettings);
         setReady(true);
         /* eslint-enable react-hooks/set-state-in-effect */
-    }, []);
+    }, [settingsStorageKey, scope]);
 
     useEffect(() => {
-        if (!ready) {
+        if (!ready || !settingsStorageKey || !scope.isCurrent()) {
             return undefined;
         }
 
         try {
             window.localStorage.setItem(
-                SETTINGS_STORAGE_KEY,
+                settingsStorageKey,
                 JSON.stringify(settings),
             );
         } catch {
@@ -598,14 +591,16 @@ export default function SettingsPage() {
         }, 1800);
 
         return () => window.clearTimeout(timeoutId);
-    }, [settings, ready]);
+    }, [settings, ready, settingsStorageKey, scope]);
 
     useEffect(() => {
-        let cancelled = false;
+        if (!scope.isCurrent()) return undefined;
+        const operation = scope.begin();
+        const current = () => operation.isCurrent();
 
         async function loadIntegrationSettings() {
             if (!signedIn) {
-                if (!cancelled) {
+                if (current()) {
                     setIntegrationSettings(createDefaultIntegrationSettings());
                     setIntegrationSettingsError("");
                     setIntegrationSettingsLoading(false);
@@ -621,9 +616,12 @@ export default function SettingsPage() {
             try {
                 const response = await apiFetch("/v1/auth/me", {
                     method: "GET",
-                    credentials: "include",
+                    signal: operation.signal,
                 });
 
+                if (!current()) return;
+                const returnedId = response?.user?.user_id ?? response?.user?.id ?? response?.user_id ?? response?.id;
+                if (returnedId !== scope.identityKey) throw new Error("Settings response belongs to a different account.");
                 const serverSettings = response?.settings;
 
                 if (!serverSettings || typeof serverSettings !== "object") {
@@ -632,7 +630,7 @@ export default function SettingsPage() {
                     );
                 }
 
-                if (!cancelled) {
+                if (current()) {
                     setIntegrationSettings(
                         mapBackendSettingsToFormState(serverSettings),
                     );
@@ -642,9 +640,10 @@ export default function SettingsPage() {
                     setGitLabIntegrationEnabled(
                         serverSettings.gitlab?.enabled === true,
                     );
+                    setLlmIntegrationEnabled(serverSettings.llm?.enabled === true);
                 }
             } catch (error) {
-                if (!cancelled) {
+                if (current()) {
                     setIntegrationSettingsError(
                         error instanceof Error
                             ? error.message
@@ -652,7 +651,7 @@ export default function SettingsPage() {
                     );
                 }
             } finally {
-                if (!cancelled) {
+                if (current()) {
                     setIntegrationSettingsLoading(false);
                 }
             }
@@ -661,15 +660,18 @@ export default function SettingsPage() {
         loadIntegrationSettings();
 
         return () => {
-            cancelled = true;
+            operation.cancel();
         };
     }, [
         signedIn,
+        scope,
+        setLlmIntegrationEnabled,
         setGitHubIntegrationEnabled,
         setGitLabIntegrationEnabled,
     ]);
 
     function updateSetting(key, value) {
+        if (!scope.isCurrent()) return;
         setSettings((current) => ({
             ...current,
             [key]: value,
@@ -677,6 +679,7 @@ export default function SettingsPage() {
     }
 
     function updateIntegrationSetting(section, key, value) {
+        if (!scope.isCurrent()) return;
         setIntegrationSettings((current) => ({
             ...current,
             [section]: {
@@ -687,6 +690,7 @@ export default function SettingsPage() {
     }
 
     function resetSettings() {
+        if (!scope.isCurrent()) return;
         setSettings(DEFAULT_SETTINGS);
     }
 
@@ -732,10 +736,12 @@ export default function SettingsPage() {
     }
 
     async function saveIntegrationSettings() {
-        if (!signedIn || integrationSettingsSaving) {
+        if (!scope.isCurrent() || !signedIn || integrationSettingsLoading || savingRef.current) {
             return;
         }
 
+        const operation = scope.begin();
+        savingRef.current = true;
         setIntegrationSettingsSaving(true);
         setIntegrationSettingsError("");
         setIntegrationSettingsSaved(false);
@@ -746,13 +752,13 @@ export default function SettingsPage() {
                 headers: {
                     "Content-Type": "application/json",
                 },
-                credentials: "include",
+                signal: operation.signal,
                 body: buildIntegrationSettingsPayload(),
             });
 
+            if (!operation.isCurrent()) return;
             const savedSettings = response?.settings ?? response;
 
-            console.log(savedSettings);
 
             if (!savedSettings || typeof savedSettings !== "object") {
                 throw new Error(
@@ -769,23 +775,29 @@ export default function SettingsPage() {
             setGitLabIntegrationEnabled(
                 savedSettings.gitlab?.enabled === true,
             );
+            setLlmIntegrationEnabled(savedSettings.llm?.enabled === true);
             setIntegrationSettingsSaved(true);
 
-            window.setTimeout(() => {
-                setIntegrationSettingsSaved(false);
+            window.clearTimeout(saveNoticeTimer.current);
+            saveNoticeTimer.current = window.setTimeout(() => {
+                if (scope.isCurrent(operation.epoch)) setIntegrationSettingsSaved(false);
             }, 3000);
         } catch (error) {
+            if (!operation.isCurrent()) return;
             setIntegrationSettingsError(
                 error instanceof Error
                     ? error.message
                     : "Unable to save integration settings.",
             );
         } finally {
-            setIntegrationSettingsSaving(false);
+            if (operation.isCurrent()) {
+                savingRef.current = false;
+                setIntegrationSettingsSaving(false);
+            }
+            operation.close();
         }
     }
 
-    console.log("Settings:", integrationSettings);
 
     return (
         <main className="scrollbar-hidden mx-auto min-h-0 w-full max-w-6xl flex-1 overflow-y-auto px-4 py-8 sm:py-10">
@@ -847,8 +859,8 @@ export default function SettingsPage() {
                         <section className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200">
                             <p className="font-medium">You are not signed in.</p>
                             <p className="mt-1">
-                                These local preferences still work in this browser. Sign
-                                in to use repository integrations and access your profile.
+                                These preferences work for this page session while signed out.
+                                Sign in to keep account-scoped browser preferences and use integrations.
                             </p>
                             <button
                                 type="button"

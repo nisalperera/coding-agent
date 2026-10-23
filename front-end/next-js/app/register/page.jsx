@@ -2,12 +2,21 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { authSession } from "../../lib/auth";
+import { createAuthCompletionGuard } from "../../lib/auth-completion.mjs";
 import { useTheme } from '../../components/ThemeProvider';
 import { useAuth } from "../../hooks/useAuth";
 
 export default function RegisterPage() {
     const router = useRouter();
+    const completionRef = useRef(null);
+    if (completionRef.current === null) completionRef.current = createAuthCompletionGuard();
+    useEffect(() => {
+        const guard = completionRef.current;
+        guard.activate();
+        return () => guard.deactivate();
+    }, []);
     const { registerWithPassword, loginWithGoogle } = useAuth();
 
     const [name, setName] = useState("");
@@ -20,6 +29,8 @@ export default function RegisterPage() {
 
     async function handleSubmit(event) {
         event.preventDefault();
+        const guard = completionRef.current;
+        const ticket = guard.begin();
         setError("");
 
         if (password !== confirmPassword) {
@@ -35,17 +46,19 @@ export default function RegisterPage() {
         setSubmitting(true);
 
         try {
-            await registerWithPassword({
+            const user = await registerWithPassword({
                 name,
                 email,
                 password,
             });
 
+            if (!guard.canComplete(ticket, user, authSession.getSnapshot())) return;
             router.replace("/");
         } catch (registerError) {
+            if (!guard.isCurrent(ticket)) return;
             setError(registerError.message || "Unable to create account");
         } finally {
-            setSubmitting(false);
+            if (guard.isCurrent(ticket)) setSubmitting(false);
         }
     }
 

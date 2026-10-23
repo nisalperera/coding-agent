@@ -7,7 +7,10 @@ import { technologyLabels, PROJECT_TYPES } from '../../lib/project-domain.mjs';
 import { ProjectError } from './ProjectShell';
 import ProjectDialog from './ProjectDialog';
 import ProjectForm from './ProjectForm';
+import { useIdentityLease } from '../VerifiedIdentityBoundary';
 export default function ProjectsPage() {
+  const scope = useIdentityLease();
+  const mutationRef = useRef(false);
   const router = useRouter(); const params = useSearchParams();
   const [version, setVersion] = useState(0);
   const [result, setResult] = useState(null);
@@ -20,22 +23,25 @@ export default function ProjectsPage() {
     ? 'Project soft-deleted. It was removed from active projects; its data was not permanently erased.'
     : '';
   function dismissNotice() {
+    if (!scope.isCurrent()) return;
     const next = new URLSearchParams(params.toString());
     next.delete('notice');
     const queryString = next.toString();
     router.replace(queryString ? `/projects?${queryString}` : '/projects', { scroll: false });
   }
   useEffect(() => {
-    const controller = new AbortController();
-    listProjects(controller.signal).then(projects => { if (!controller.signal.aborted) setResult({ version, projects, error: null }); }).catch(error => { if (!controller.signal.aborted) setResult({ version, projects: [], error }); });
-    return () => controller.abort();
-  }, [version]);
-  function close() { if (!busy && (!dirty.current || window.confirm('Discard your unsaved project changes?'))) { setOpen(false); dirty.current = false; } }
+    if (!scope.isCurrent()) return undefined;
+    const operation = scope.begin();
+    listProjects(operation.signal).then(projects => { if (operation.isCurrent()) setResult({ version, projects, error: null }); }).catch(error => { if (operation.isCurrent()) setResult({ version, projects: [], error }); });
+    return () => operation.cancel();
+  }, [version, scope]);
+  function close() { if (!scope.isCurrent()) return; if (!busy && (!dirty.current || window.confirm('Discard your unsaved project changes?'))) { setOpen(false); dirty.current = false; } }
   async function create(payload) {
-    if (busy) return; setBusy(true); setError('');
-    try { const project = await createProject(payload); dirty.current = false; setOpen(false); router.push(`/projects/${encodeURIComponent(project.id)}`); }
-    catch (error) { setError(`${error.message} If the outcome is uncertain, close this dialog and refresh the list before retrying.`); }
-    finally { setBusy(false); }
+    if (!scope.isCurrent() || mutationRef.current) return;
+    const operation = scope.begin(); mutationRef.current = true; setBusy(true); setError('');
+    try { const project = await createProject(payload, operation.signal); if (!operation.isCurrent()) return; dirty.current = false; setOpen(false); router.push(`/projects/${encodeURIComponent(project.id)}`); }
+    catch (error) { if (!operation.isCurrent()) return; setError(`${error.message} If the outcome is uncertain, close this dialog and refresh the list before retrying.`); }
+    finally { if (operation.isCurrent()) { mutationRef.current = false; setBusy(false); } operation.close(); }
   }
   const visible = state.projects.filter(item => `${item.name} ${item.description}`.toLowerCase().includes(query.toLowerCase()));
   return <>

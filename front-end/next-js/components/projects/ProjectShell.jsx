@@ -1,9 +1,10 @@
 'use client';
 import Link from 'next/link';
-import { useAuth } from '../../hooks/useAuth';
+import { usePathname } from 'next/navigation';
+import VerifiedIdentityBoundary from '../VerifiedIdentityBoundary';
 import { useTheme } from '../ThemeProvider';
 export default function ProjectShell({ children }) {
-  const { signedIn, authLoading } = useAuth();
+  const pathname = usePathname();
   const { dark, toggleTheme } = useTheme();
   return <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-900">
@@ -16,8 +17,7 @@ export default function ProjectShell({ children }) {
     </header>
     <main id="project-main" className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-8">
       <div className="mx-auto w-full max-w-5xl">
-        {authLoading ? <p role="status">Checking your session...</p> : !signedIn ?
-          <section className="rounded-xl border border-slate-300 p-6 dark:border-slate-700"><h1 className="text-xl font-semibold">Sign in to manage projects</h1><p className="my-3">Projects are private to your account.</p><Link className="text-blue-600 underline dark:text-blue-300" href="/login">Sign in</Link></section> : children}
+        <VerifiedIdentityBoundary key={pathname}>{children}</VerifiedIdentityBoundary>
       </div>
     </main>
   </div>;

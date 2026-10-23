@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+output
+coverage
+.env
+.env.*
+**/.env
+**/.env.*
+**/client_secret*.json
+**/*private-key*
+*.log

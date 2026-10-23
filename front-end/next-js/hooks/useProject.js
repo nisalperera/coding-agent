@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getProject } from '../lib/projects';
+import { useIdentityLease } from '../components/VerifiedIdentityBoundary';
 
 const INVALID_PROJECT_ID = new Error(
   'The project route did not provide a valid project ID.'
 );
 
 export function useProject(projectId) {
+  const scope = useIdentityLease();
   const [version, setVersion] = useState(0);
   const [result, setResult] = useState(null);
   const requestRef = useRef(null);
@@ -15,18 +17,19 @@ export function useProject(projectId) {
     projectId !== 'undefined' && projectId !== 'null';
 
   useEffect(() => {
-    if (!validId) return;
+    if (!validId || !scope.isCurrent()) return;
 
-    const controller = new AbortController();
+    const operation = scope.begin();
+    const controller = { signal: operation.signal, abort: operation.cancel };
     const request = { id: projectId, version, controller };
     requestRef.current = request;
 
     getProject(projectId, controller.signal).then(project => {
-      if (!controller.signal.aborted) {
+      if (operation.isCurrent()) {
         setResult({ id: projectId, version, project, error: null });
       }
     }).catch(error => {
-      if (!controller.signal.aborted) {
+      if (operation.isCurrent()) {
         setResult({ id: projectId, version, project: null, error });
       }
     });
@@ -35,16 +38,16 @@ export function useProject(projectId) {
       controller.abort();
       if (requestRef.current === request) requestRef.current = null;
     };
-  }, [projectId, validId, version]);
+  }, [projectId, validId, version, scope]);
 
-  const reload = useCallback(() => setVersion(value => value + 1), []);
+  const reload = useCallback(() => { if (scope.isCurrent()) setVersion(value => value + 1); }, [scope]);
   const replace = useCallback(project => {
-    if (project?.id !== projectId) return;
+    if (!scope.isCurrent() || project?.id !== projectId) return;
     const request = requestRef.current;
     if (request && (request.id !== projectId || request.version !== version)) return;
     request?.controller.abort();
     setResult({ id: projectId, version, project, error: null });
-  }, [projectId, version]);
+  }, [projectId, version, scope]);
 
   if (!validId) {
     return { project: null, loading: false, error: INVALID_PROJECT_ID, reload, replace };

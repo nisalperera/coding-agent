@@ -14,11 +14,12 @@ export class ApiError extends Error {
 
 export async function apiFetch(
   path,
-  { method = 'GET', body, headers = {} } = {},
+  { method = 'GET', body, headers = {}, signal } = {},
 ) {
   const response = await fetch(`${BACKEND_URL}${path}`, {
     method,
     credentials: 'include',
+    signal,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...headers,
@@ -46,10 +47,11 @@ export async function apiFetch(
   return payload;
 }
 
-export async function apiStream(path, body) {
+export async function apiStream(path, body, { signal } = {}) {
   const response = await fetch(`${BACKEND_URL}${path}`, {
     method: 'POST',
     credentials: 'include',
+    signal,
     headers: {
       'Content-Type': 'application/json',
     },
