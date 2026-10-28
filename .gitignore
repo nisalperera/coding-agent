@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -216,3 +216,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+back-end/fast-api/data/*.db
+back-end/fast-api/.backend/
+
+vllm-model/huggingface/
+
+database/mongodb/.env
+database/mongodb/data/
+!mongodb/data/.gitkeep
+
+
+database/mysql/.env
+database/mysql/data/
+!mysql/data/.gitkeep
+
+database/postgresql/.env
+database/postgresql/data/
+!postgresql/data/.gitkeep
+
+/projects/
+
+front-end/nextjs/.env
+front-end/nextjs/.next/
