@@ -1,0 +1,6 @@
+[submodule "coding-agent-front-end"]
+	path = coding-agent-front-end
+	url = git@github.com:nisalperera/coding-agent-front-end.git
+[submodule "coding-agent-back-end"]
+	path = coding-agent-back-end
+	url = git@github.com:nisalperera/coding-agent-back-end.git
