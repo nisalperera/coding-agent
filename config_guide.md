@@ -22,9 +22,9 @@ issues via REST APIs).
 | **Shared repo tokens** | One GitHub PAT and one GitLab PAT used as the fallback service-level identity for `github_push_file`/`gitlab_push_file` when a user hasn't connected their own account. | [SETUP_GUIDE.md → Step 5](./SETUP_GUIDE.md#step-5-shared-githubgitlab-repo-management-tokens) |
 | **DynamoDB tables** | `pending-actions` (human-in-the-loop approvals, TTL) and `user-integrations` (per-user OAuth tokens — GitHub only; GitLab tokens never reach the backend). Created automatically by `sam deploy`; manual commands included for reference only. | [SETUP_GUIDE.md → Step 6](./SETUP_GUIDE.md#step-6-dynamodb-tables-optional--sam-creates-these-automatically-in-step-8) |
 | **Tavily API key** | Powers the agent's `web_search` tool. | [SETUP_GUIDE.md → Step 7](./SETUP_GUIDE.md#step-7-tavily-api-key) |
-| **First SAM deploy** | Creates the Lambda + Function URL, both DynamoDB tables, and the S3+CloudFront front-end hosting — using placeholder GitHub OAuth values, since the real callback URL doesn't exist yet. | [SETUP_GUIDE.md → Step 8](./SETUP_GUIDE.md#step-8-first-deploy-sam--with-placeholder-github-oauth-values) |
+| **First SAM deploy** | Creates the Lambda + Function URL, both DynamoDB tables, and the S3+CloudFront coding-agent-front-end hosting — using placeholder GitHub OAuth values, since the real callback URL doesn't exist yet. | [SETUP_GUIDE.md → Step 8](./SETUP_GUIDE.md#step-8-first-deploy-sam--with-placeholder-github-oauth-values) |
 | **Stack outputs** | `FunctionUrl`, `FrontendUrl`, `FrontendBucketName`, `FrontendDistributionId`. | [SETUP_GUIDE.md → Step 9](./SETUP_GUIDE.md#step-9-retrieve-stack-outputs) |
-| **Cognito callback update** | Point the app client's callback/logout URLs at the real front-end URL. | [SETUP_GUIDE.md → Step 10](./SETUP_GUIDE.md#step-10-update-the-cognito-app-client-with-the-real-front-end-url) |
+| **Cognito callback update** | Point the app client's callback/logout URLs at the real coding-agent-front-end URL. | [SETUP_GUIDE.md → Step 10](./SETUP_GUIDE.md#step-10-update-the-cognito-app-client-with-the-real-coding-agent-front-end-url) |
 | **Connect GitHub / Connect GitLab** | Per-user repository OAuth, independent of Cognito. Once connected, actions run as that user, not the shared PAT/token — see the note below. GitHub needs a redeploy afterward with real credentials. | [SETUP_GUIDE.md → Step 11](./SETUP_GUIDE.md#step-11-register-the-per-user-connect-githubconnect-gitlab-oauth-integrations) |
 | **Custom domain (optional)** | Route 53 + free auto-validated ACM cert + CloudFront alias. HTTPS is enforced regardless of whether you use this. | [SETUP_GUIDE.md → Step 12](./SETUP_GUIDE.md#step-12-optional-custom-domain-via-an-existing-route-53-hosted-zone) |
 | **CI/CD secrets** | Full GitHub Secrets / GitLab CI variable list, with the `GITHUB_`-prefix rename explained. | [SETUP_GUIDE.md → Step 13](./SETUP_GUIDE.md#step-13-cicd-secrets--github-actions--gitlab-ci) |
@@ -39,18 +39,18 @@ issues via REST APIs).
 
 This branch (`feature/fastapi-mysql-oauth`) targets a self-hosted local/LAN deployment
 of the coding agent as an alternative to the AWS stack described above. It uses FastAPI
-(`back-end/fast-api/main.py`), MySQL with SQLAlchemy and Alembic, direct Google OpenID
+(`coding-agent-back-end/fast-api/main.py`), MySQL with SQLAlchemy and Alembic, direct Google OpenID
 Connect with server-side sessions, and a local/LAN OpenAI-compatible vLLM server.
 
 | AWS component | Local equivalent (this branch) |
 |---|---|
-| Lambda (`back-end/lambda_function.py`) | FastAPI app (`back-end/fast-api/main.py`) |
+| Lambda (`coding-agent-back-end/lambda_function.py`) | FastAPI app (`coding-agent-back-end/fast-api/main.py`) |
 | Cognito + Google federation | Direct Google OpenID Connect (`app/auth`), server-side sessions |
 | DynamoDB `pending-actions` / `user-integrations` | MySQL via SQLAlchemy + Alembic (`app/db/models.py`, `app/db/sqlalchemy_database.py`) |
 | EC2 auto-start + vLLM | Local/LAN vLLM OpenAI-compatible server (`app/services/vllm_service.py`) |
 | Shared GitHub/GitLab PAT fallback | Per-user provider OAuth, with shared tokens available only behind `ALLOW_LEGACY_PROVIDER_TOKEN_FALLBACK` for local development |
 
-Schema changes are managed by Alembic under `back-end/fast-api/alembic/`, generated from
+Schema changes are managed by Alembic under `coding-agent-back-end/fast-api/alembic/`, generated from
 the SQLAlchemy models in `app/db/models.py`. Run `alembic upgrade head` against a
 configured `DATABASE_URL` to create or upgrade the local MySQL schema; application
 startup never runs DDL itself.
@@ -83,7 +83,7 @@ target. This section applies only to the local deployment architecture on this b
 ## How per-user repo authorization actually gets used
 
 **GitHub** — Once a user clicks "Connect GitHub" (Step 11) and the OAuth exchange
-completes, `back-end/lambda_function.py`'s `call_repo_tool()` looks up that user's
+completes, `coding-agent-back-end/lambda_function.py`'s `call_repo_tool()` looks up that user's
 stored access token (`github_oauth.get_user_integration(user_id, "github")`) and
 passes it into `repo_tools.py`'s `github_create_branch`/`github_push_file`/
 `github_open_pull_request`/`github_create_issue` as a `github_token` kwarg — every
@@ -96,7 +96,7 @@ Disconnecting GitHub (the 🔗 modal, or the header button) also calls the
 
 **GitLab** — GitLab's per-user token is a "public"/native OAuth client PKCE token that
 lives only in the browser's `localStorage`; it is never sent to the backend to be
-stored. Instead, `front-end/app.js`'s `resolvePendingAction()` attaches it (as
+stored. Instead, `coding-agent-front-end/app.js`'s `resolvePendingAction()` attaches it (as
 `gitlab_token`) only at the moment a `gitlab_*` tool call is being approved via the
 human-in-the-loop flow, and `call_repo_tool()` passes it through to `repo_tools.py`'s
 `gitlab_*` functions for that single call only, then discards it. If the user hasn't
@@ -104,20 +104,20 @@ connected GitLab, those calls fall back to the shared `GITLAB_TOKEN`. Disconnect
 GitLab clears only the browser's copy, since the server never had one.
 
 This applies to both provider flows via the `approve_pending` action — which is also
-where the front-end's confirmation UI (`appendConfirmation()`/`resolvePendingAction()`
+where the coding-agent-front-end's confirmation UI (`appendConfirmation()`/`resolvePendingAction()`
 in `app.js`) renders Approve/Deny controls for every risky tool call.
 
 ---
 
-## How the front-end actually consumes the streamed response
+## How the coding-agent-front-end actually consumes the streamed response
 
-`back-end/lambda_function.py` writes its response as a sequence of events, not one
+`coding-agent-back-end/lambda_function.py` writes its response as a sequence of events, not one
 JSON document: zero or more `{"type":"progress", ...}` lines while `ensure_backend_ready()`
 polls a cold EC2 instance / loading vLLM, then either a single `{"type":"error"}` or
 `{"type":"confirmation_required"}` object, **or** `{"type":"answer_start"}` followed by
 `"data: {\"token\": ...}\n\n"` SSE-style chunks ending in `"data: [DONE]\n\n"`.
 
-`front-end/app.js`'s `consumeAgentStream()` reads `response.body` as a `ReadableStream`,
+`coding-agent-front-end/app.js`'s `consumeAgentStream()` reads `response.body` as a `ReadableStream`,
 buffers and splits on newlines, and dispatches each event to a handler as it arrives:
 progress lines update a single in-place "⏳ ..." bubble (`appendProgressMessage()`/
 `updateProgressMessage()`), an `answer_start` swaps that bubble out for a live assistant
@@ -154,11 +154,11 @@ by design.
 - [x] Per-user rate limiting (OWASP API Security)
 - [x] Object-level authorization via `owns_conversation()` (OWASP API Security — BOLA)
 - [x] Human-in-the-loop approval for all mutating tools (OWASP LLM Top 10 — Excessive Agency),
-      with a working front-end Approve/Deny UI (`appendConfirmation()`/`resolvePendingAction()`)
+      with a working coding-agent-front-end Approve/Deny UI (`appendConfirmation()`/`resolvePendingAction()`)
 - [x] Structured JSON logging with trace IDs
 - [x] All config/tokens via environment variables / Secrets Manager
 - [x] Lambda response streaming for real-time token output, correctly consumed end-to-end
-      by the front-end's `consumeAgentStream()` (progress → answer/confirmation/error)
+      by the coding-agent-front-end's `consumeAgentStream()` (progress → answer/confirmation/error)
 - [x] EC2 auto-start with bounded 2-minute startup budget and progress/retry UX, with a
       visible in-chat progress indicator during cold starts
 - [x] Repo-management tools use REST API endpoints only, never shell git/gh/glab commands
@@ -170,10 +170,10 @@ by design.
 - [x] Disconnecting GitHub revokes the server-side DynamoDB token, not just a browser flag
 - [x] Front-end S3 bucket fully private, served only via CloudFront with OAC
 - [x] Custom-domain certificate DNS-validated automatically, no manual approval step
-- [x] HTTPS enforced end-to-end for the front-end, on both default and custom domains
+- [x] HTTPS enforced end-to-end for the coding-agent-front-end, on both default and custom domains
 - [x] GitHub is never federated through Cognito — see SETUP_GUIDE.md Step 4's callout
 - [x] Lambda Function URL CORS explicitly allows the `authorization`/`content-type`
-      headers the front-end actually sends (see `template.yaml`'s `FunctionUrlConfig`)
+      headers the coding-agent-front-end actually sends (see `template.yaml`'s `FunctionUrlConfig`)
 
 ## Known gaps to close before production
 
@@ -194,7 +194,7 @@ by design.
   which breaks whenever `ensure_backend_ready()` emits progress lines before the final
   answer/confirmation~~ — **resolved**: `send()` now uses `consumeAgentStream()` to read
   `response.body` as a stream and dispatch each event (progress / answer_start+tokens /
-  confirmation_required / error) as it arrives. See "How the front-end actually consumes
+  confirmation_required / error) as it arrives. See "How the coding-agent-front-end actually consumes
   the streamed response" above.
 - The live-updating assistant bubble re-parses the *entire* accumulated markdown string
   through `marked.parse()` on every single token during streaming, rather than

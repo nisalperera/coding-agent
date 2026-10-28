@@ -217,9 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-back-end/fast-api/data/*.db
-back-end/fast-api/alembic/
-back-end/fast-api/.backend/
+coding-agent-back-end/fast-api/data/*.db
+coding-agent-back-end/fast-api/alembic/
+coding-agent-back-end/fast-api/.backend/
 
 vllm-model/huggingface/
 
@@ -235,3 +235,16 @@ database/mysql/data/
 database/postgresql/.env
 database/postgresql/data/
 !postgresql/data/.gitkeep
+
+*.md
+
+!README.md
+!config_guide.md
+!SETUP_GUIDE.md
+
+.secrets.json
+
+output/
+projects/
+
+services.txt

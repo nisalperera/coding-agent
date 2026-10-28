@@ -3,7 +3,7 @@
 This is the **complete, dependency-ordered** walkthrough for standing up the coding
 agent from a blank AWS account to a live, working deployment. Follow the steps in
 order, several later steps genuinely cannot be done before earlier ones (e.g. you
-cannot register a GitHub OAuth App's callback URL before the front-end has a real
+cannot register a GitHub OAuth App's callback URL before the coding-agent-front-end has a real
 CloudFront URL, which doesn't exist until after the first deploy).
 
 **Prerequisites:** an AWS account with CLI credentials configured, a GitHub account,
@@ -428,7 +428,7 @@ aws cognito-idp create-user-pool-client \
 ```
 
 The callback/logout URLs use `localhost` placeholders here because the real
-front-end URL doesn't exist yet (it's a CloudFront output from Step 8). You'll update
+coding-agent-front-end URL doesn't exist yet (it's a CloudFront output from Step 8). You'll update
 these with `update-user-pool-client` in Step 10.
 
 ### Step 4.3: Set up the Hosted UI domain
@@ -538,7 +538,7 @@ with the CI/CD secret names in Step 13 — it now points at Ollama's port (`1143
 instead of vLLM's (`8000`); see Step 2's callout.
 
 This creates: the `ChatFunction` Lambda + Function URL, both DynamoDB tables, and the
-front-end's `FrontendBucket` + `FrontendOriginAccessControl` + `FrontendDistribution`
+coding-agent-front-end's `FrontendBucket` + `FrontendOriginAccessControl` + `FrontendDistribution`
 + `FrontendBucketPolicy` (S3 fully private, served only via CloudFront with HTTPS
 enforced).
 
@@ -555,11 +555,11 @@ You need three of these outputs for the next steps:
 
 - `FunctionUrl` — the Lambda chat endpoint
 - `FrontendUrl` — the CloudFront (or custom domain) URL, always `https://`
-- `FrontendBucketName` / `FrontendDistributionId` — for manual front-end syncs if needed
+- `FrontendBucketName` / `FrontendDistributionId` — for manual coding-agent-front-end syncs if needed
 
 ---
 
-## Step 10: Update the Cognito app client with the real front-end URL
+## Step 10: Update the Cognito app client with the real coding-agent-front-end URL
 
 ```bash
 aws cognito-idp update-user-pool-client \
@@ -615,7 +615,7 @@ sam deploy \
 ```
 
 The GitLab Application ID doesn't go into this SAM deploy at all — it only needs to
-reach `front-end/config.js` (Step 14), since GitLab's flow is entirely client-side.
+reach `coding-agent-front-end/config.js` (Step 14), since GitLab's flow is entirely client-side.
 
 ---
 

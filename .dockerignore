@@ -1,11 +1,11 @@
-front-end/node_modules/
-front-end/.next/
+coding-agent-front-end/node_modules/
+coding-agent-front-end/.next/
 
-back-end/__pycache__/
-back-end/.pytest_cache/
-back-end/.ruff_cache/
-back-end/.venv/
-back-end/*.pyc
+coding-agent-back-end/__pycache__/
+coding-agent-back-end/.pytest_cache/
+coding-agent-back-end/.ruff_cache/
+coding-agent-back-end/.venv/
+coding-agent-back-end/*.pyc
 
 vllm-model/
 cli/ 
