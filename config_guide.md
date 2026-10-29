@@ -204,3 +204,17 @@ by design.
 ---
 
 *Configuration reference for the coding agent project.*
+
+
+<!-- deliverable-1-projects-frontend -->
+## Projects frontend configuration (Deliverable 1 review)
+
+No new frontend environment variables, npm dependencies, or storage services are
+introduced. Requests use existing `APP_CONFIG.BACKEND_URL` and session cookies.
+Implement the proposed project routes and revision semantics in
+`coding-agent-front-end/next-js/PROJECTS_API_CONTRACT.md` before enabling persistence.
+Verify cookie, CSRF, CORS, PATCH/DELETE, and `If-Match` policy on the backend.
+
+Do not put credentials, project records, or private content in localStorage.
+Backend authorization and operator bootstrap are outside this frontend delivery.
+Remaining validation is tracked in `coding-agent-front-end/next-js/DELIVERABLE_1_FRONTEND.md`.
